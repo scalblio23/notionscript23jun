@@ -14,7 +14,7 @@ async function getAllOpenTasks() {
       database_id: DATABASE_ID,
       filter: {
         property: 'Status',
-        status: { does_not_equal: 'Done' },
+        select: { does_not_equal: 'Done' },
       },
       sorts: [{ property: 'Priority Score', direction: 'ascending' }],
       start_cursor: cursor,
