@@ -1,0 +1,17 @@
+{
+  "name": "notion-focus-view",
+  "version": "1.0.0",
+  "description": "Automatically manages Notion Focus View by assigning Focus Slots to the top 7 priority tasks.",
+  "main": "api/sync.js",
+  "scripts": {
+    "sync": "node -e \"require('./api/sync').syncFocusSlots().then(console.log).catch(console.error)\"",
+    "start": "node api/sync.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.15"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
