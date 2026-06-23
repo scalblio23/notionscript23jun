@@ -1,7 +1,6 @@
 const { syncFocusSlots } = require('./sync');
 
 module.exports = async function handler(req, res) {
-  // Vercel cron jobs send GET requests; guard against public invocation
   const authHeader = req.headers['authorization'];
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
