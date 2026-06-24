@@ -91,9 +91,6 @@ async function createTasksForClient(clientPageId) {
         'Onboarding Stage': {
           select: { name: task.stage },
         },
-        '#': {
-          number: task.number,
-        },
       },
     });
 
