@@ -104,6 +104,17 @@ async function getAllOpenPages() {
 }
 
 async function ensureDividers(existingDividers) {
+  const validNames = new Set(DIVIDERS.map(d => d.name));
+
+  // Archive stale dividers that no longer match current names
+  for (const page of existingDividers) {
+    const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
+    if (!validNames.has(title)) {
+      await notion.pages.update({ page_id: page.id, archived: true });
+      console.log(`[sync] Archived stale divider: "${title}"`);
+    }
+  }
+
   for (const div of DIVIDERS) {
     const exists = existingDividers.some(
       p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
@@ -115,7 +126,6 @@ async function ensureDividers(existingDividers) {
         properties: {
           'Name': { title: [{ text: { content: div.name } }] },
           'Focus Slot': { number: div.slot },
-          'Status': { select: { name: 'To do' } },
         },
       });
       console.log(`[sync] Created divider: "${div.name}"`);
