@@ -17,7 +17,7 @@ async function getTriggeredClients() {
       database_id: CLIENT_DB_ID,
       filter: {
         property: 'CCF Trigger',
-        status: { equals: CCF_TRIGGER_VALUE },
+        select: { equals: CCF_TRIGGER_VALUE },
       },
       start_cursor: cursor,
       page_size: 100,
@@ -82,7 +82,7 @@ async function markClientDone(clientPageId) {
     page_id: clientPageId,
     properties: {
       'CCF Trigger': {
-        status: { name: CCF_DONE_VALUE },
+        select: { name: CCF_DONE_VALUE },
       },
     },
   });
