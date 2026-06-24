@@ -5,6 +5,24 @@ const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
 const FOCUS_SLOTS = 7;
 
+function calcPriorityScore(page) {
+  const props = page.properties;
+  const taskPriority = props['Task Priority']?.select?.name ?? '';
+  const clientRank = props['Client Priority Rank']?.number;
+  const daysLate = props['Days Late']?.formula?.number ?? 0;
+
+  if (taskPriority === '💀 Do this before anything else') return -1;
+  if (clientRank == null) return 999999;
+
+  const statusRank =
+    taskPriority === '🚨 Urgent' ? 1 :
+    taskPriority === '⏰ Important' ? 2 :
+    taskPriority === '🟠 Pending' ? 3 :
+    taskPriority === '😌 Get to it when you can' ? 4 : 5;
+
+  return clientRank * 100000 + statusRank * 1000 - daysLate;
+}
+
 async function getAllOpenTasks() {
   const tasks = [];
   let cursor;
@@ -16,10 +34,6 @@ async function getAllOpenTasks() {
         property: 'Status',
         select: { does_not_equal: 'Done' },
       },
-      sorts: [
-        { property: 'Priority Score', direction: 'ascending' },
-        { property: 'Client Priority Rank', direction: 'ascending' },
-      ],
       start_cursor: cursor,
       page_size: 100,
     });
@@ -27,6 +41,8 @@ async function getAllOpenTasks() {
     tasks.push(...response.results);
     cursor = response.has_more ? response.next_cursor : undefined;
   } while (cursor);
+
+  tasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
 
   return tasks;
 }
