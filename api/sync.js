@@ -41,20 +41,20 @@ function calcPriorityScore(page) {
     clientPriority === 'Med' ? 1 :
     clientPriority === 'Low' ? 2 : 3;
 
-  // Rule 3: Task Type (Onboarding before regular tasks)
-  const taskTypeRank = taskType === 'Onboarding' ? 0 : 1;
+  // Rule 3: Task Type (Onboarding-related stages before regular tasks)
+  const onboardingStages = new Set(['Onboarding', 'Day 1', 'Day 2', 'Day 3', 'Client Assets']);
+  const taskTypeRank = onboardingStages.has(onboardingStage) ? 0 : 1;
 
   // Rule 4: Message tasks rank higher within their group
   const messageRank = taskName.includes('message') ? 0 : 1;
 
-  // Rule 5: Onboarding Stage sequence (only for Onboarding type)
-  const stageRank = taskType === 'Onboarding'
-    ? (onboardingStage === 'Onboarding' ? 0 :
-       onboardingStage === 'Day 1' ? 1 :
-       onboardingStage === 'Day 2' ? 2 :
-       onboardingStage === 'Day 3' ? 3 :
-       onboardingStage === 'Client Assets' ? 4 : 5)
-    : 0;
+  // Rule 5: Onboarding Stage sequence
+  const stageRank =
+    onboardingStage === 'Onboarding' ? 0 :
+    onboardingStage === 'Day 1' ? 1 :
+    onboardingStage === 'Day 2' ? 2 :
+    onboardingStage === 'Day 3' ? 3 :
+    onboardingStage === 'Client Assets' ? 4 : 5;
 
   // Rule 6: Task Priority
   const taskPriorityRank =
