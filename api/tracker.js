@@ -40,11 +40,7 @@ async function getAllTasks() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({
-      database_id: TASK_DB_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const res = await notion.databases.query({ database_id: TASK_DB_ID, start_cursor: cursor, page_size: 100 });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
@@ -55,15 +51,22 @@ async function getAllClients() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({
-      database_id: CLIENT_DB_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const res = await notion.databases.query({ database_id: CLIENT_DB_ID, start_cursor: cursor, page_size: 100 });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
   return pages;
+}
+
+async function getCurrentChildren() {
+  const blocks = [];
+  let cursor;
+  do {
+    const res = await notion.blocks.children.list({ block_id: TRACKER_BLOCK_ID, start_cursor: cursor, page_size: 100 });
+    blocks.push(...res.results);
+    cursor = res.has_more ? res.next_cursor : undefined;
+  } while (cursor);
+  return blocks;
 }
 
 async function safeDeleteBlock(blockId) {
@@ -73,22 +76,6 @@ async function safeDeleteBlock(blockId) {
     if (err.code === 'validation_error') return;
     throw err;
   }
-}
-
-async function deleteAllChildren(blockId) {
-  let cursor;
-  let total = 0;
-  let deleted = 0;
-  do {
-    const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
-    total += res.results.length;
-    for (const block of res.results) {
-      await safeDeleteBlock(block.id);
-      deleted++;
-    }
-    cursor = res.has_more ? res.next_cursor : undefined;
-  } while (cursor);
-  console.log(`[tracker] Cleared ${deleted}/${total} existing block(s)`);
 }
 
 async function updateProgressTracker() {
@@ -134,30 +121,44 @@ async function updateProgressTracker() {
 
   rows.sort((a, b) => b.stageIndex - a.stageIndex);
 
-  await deleteAllChildren(TRACKER_BLOCK_ID);
-
-  if (rows.length === 0) {
-    await notion.blocks.children.append({
-      block_id: TRACKER_BLOCK_ID,
-      children: [{ paragraph: { rich_text: [{ text: { content: 'No pending clients.' } }] } }],
-    });
-    return { clientsTracked: 0 };
-  }
-
-  const children = rows.map(({ name, stageIndex, nextTask }) => {
+  const desiredLines = rows.map(({ name, stageIndex, nextTask }) => {
     const bar = progressBar(stageIndex);
     const stageName = STAGES[stageIndex];
     const next = nextTask ? `  →  ${nextTask}` : '';
-    const line = `${name.padEnd(22)}${bar}  ${stageName}${next}`;
-    return {
-      paragraph: { rich_text: [{ text: { content: line } }] },
-    };
+    return `${name.padEnd(22)}${bar}  ${stageName}${next}`;
   });
 
-  await notion.blocks.children.append({ block_id: TRACKER_BLOCK_ID, children });
+  const existing = await getCurrentChildren();
 
-  console.log(`[tracker] Updated tracker with ${rows.length} client(s)`);
-  return { clientsTracked: rows.length };
+  // Update existing blocks in-place
+  const updateCount = Math.min(existing.length, desiredLines.length);
+  await Promise.all(
+    Array.from({ length: updateCount }, (_, i) =>
+      notion.blocks.update({
+        block_id: existing[i].id,
+        paragraph: { rich_text: [{ text: { content: desiredLines[i] } }] },
+      })
+    )
+  );
+
+  // Append extra rows if we have more clients than existing blocks
+  if (desiredLines.length > existing.length) {
+    const extra = desiredLines.slice(existing.length).map(line => ({
+      type: 'paragraph',
+      paragraph: { rich_text: [{ text: { content: line } }] },
+    }));
+    await notion.blocks.children.append({ block_id: TRACKER_BLOCK_ID, children: extra });
+  }
+
+  // Delete leftover blocks if we have fewer clients than before
+  if (existing.length > desiredLines.length) {
+    await Promise.all(
+      existing.slice(desiredLines.length).map(b => safeDeleteBlock(b.id))
+    );
+  }
+
+  console.log(`[tracker] Updated tracker with ${desiredLines.length} client(s)`);
+  return { clientsTracked: desiredLines.length };
 }
 
 module.exports = { updateProgressTracker };
