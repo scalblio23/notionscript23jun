@@ -48,28 +48,32 @@ async function getCCFTemplatePages() {
   return pages;
 }
 
+function getTitle(page) {
+  for (const value of Object.values(page.properties)) {
+    if (value.type === 'title' && value.title.length > 0) {
+      return value.title[0].plain_text;
+    }
+  }
+  return 'Untitled';
+}
+
 async function duplicateTasksForClient(clientPageId, templatePages) {
   for (const template of templatePages) {
-    const props = template.properties;
-
-    const newProperties = {};
-
-    for (const [key, value] of Object.entries(props)) {
-      if (value.type === 'relation' || value.type === 'rollup' || value.type === 'formula') continue;
-
-      newProperties[key] = value;
-    }
-
-    newProperties['Client'] = {
-      relation: [{ id: clientPageId }],
-    };
+    const title = getTitle(template);
 
     await notion.pages.create({
       parent: { database_id: TASK_DB_ID },
-      properties: newProperties,
+      properties: {
+        'Name': {
+          title: [{ text: { content: title } }],
+        },
+        'Client': {
+          relation: [{ id: clientPageId }],
+        },
+      },
     });
 
-    console.log(`[ccf] Created task from template page ${template.id} for client ${clientPageId}`);
+    console.log(`[ccf] Created task "${title}" for client ${clientPageId}`);
   }
 }
 
