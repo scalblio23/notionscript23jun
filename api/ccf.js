@@ -2,11 +2,55 @@ const { Client } = require('@notionhq/client');
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
-const CCF_TEMPLATE_DB_ID = process.env.NOTION_CCF_TEMPLATE_DB_ID;
 const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 
 const CCF_TRIGGER_VALUE = 'DANGER: This will trigger CCF task flow';
 const CCF_DONE_VALUE = 'Done';
+
+const CCF_TASKS = [
+  { number: 1,  name: 'Ad Account Access',        stage: 'Onboarding' },
+  { number: 2,  name: 'Page Access',               stage: 'Onboarding' },
+  { number: 3,  name: 'Dashboard',                 stage: 'Onboarding' },
+  { number: 4,  name: 'Whatsapp Created',          stage: 'Onboarding' },
+  { number: 5,  name: 'Terms of service signed',   stage: 'Onboarding' },
+  { number: 6,  name: 'Strategy (Campaign Brief)', stage: 'Day 1' },
+  { number: 7,  name: 'Funnel Template',           stage: 'Day 1' },
+  { number: 8,  name: 'Message (EOD)',              stage: 'Day 1' },
+  { number: 10, name: 'Domain',                    stage: 'Day 1' },
+  { number: 11, name: 'Github Repo',               stage: 'Day 1' },
+  { number: 12, name: 'Server',                    stage: 'Day 1' },
+  { number: 13, name: 'Ad Images',                 stage: 'Day 2' },
+  { number: 14, name: 'Ad Videos',                 stage: 'Day 2' },
+  { number: 15, name: 'Ad Copy',                   stage: 'Day 2' },
+  { number: 16, name: 'Ad Targeting / Setup',      stage: 'Day 2' },
+  { number: 17, name: 'Booking System',            stage: 'Day 2' },
+  { number: 18, name: 'Message (Morning)',          stage: 'Day 2' },
+  { number: 19, name: 'Message (EOD)',              stage: 'Day 2' },
+  { number: 20, name: 'Ad Creatives Approved',     stage: 'Day 3' },
+  { number: 21, name: 'Ad Setup + Structure',      stage: 'Day 3' },
+  { number: 22, name: 'Message (EOD)',              stage: 'Day 3' },
+  { number: 23, name: 'Launch',                    stage: 'Day 3' },
+  { number: 24, name: 'Message (Morning)',          stage: 'Day 3' },
+  { number: 25, name: 'Final Details',             stage: 'Day 3' },
+  { number: 26, name: 'Confirmation Message',      stage: 'Day 3' },
+  { number: 27, name: 'Booking System',            stage: 'Day 3' },
+  { number: 28, name: 'Automations',               stage: 'Day 3' },
+  { number: 29, name: 'Ad Launch',                 stage: 'Day 3' },
+  { number: 30, name: 'Conversion Mechanism',      stage: 'Day 3' },
+  { number: 31, name: 'Lead Source',               stage: 'Client Assets' },
+  { number: 32, name: 'Details',                   stage: 'Client Assets' },
+  { number: 33, name: 'Lead Sheet',                stage: 'Client Assets' },
+  { number: 34, name: 'Claude Chat',               stage: 'Client Assets' },
+  { number: 35, name: 'Claude Code',               stage: 'Client Assets' },
+  { number: 36, name: 'Automation Notification',   stage: 'Client Assets' },
+  { number: 37, name: 'Server Link',               stage: 'Client Assets' },
+  { number: 38, name: 'Host',                      stage: 'Client Assets' },
+  { number: 39, name: 'Github',                    stage: 'Client Assets' },
+  { number: 40, name: 'GHL Workflow',              stage: 'Client Assets' },
+  { number: 41, name: 'GoHighLevel',               stage: 'Client Assets' },
+  { number: 42, name: 'Ad Account',                stage: 'Client Assets' },
+  { number: 43, name: 'Funnel Link',               stage: 'Client Assets' },
+];
 
 async function getTriggeredClients() {
   const clients = [];
@@ -30,79 +74,30 @@ async function getTriggeredClients() {
   return clients;
 }
 
-async function getCCFTemplatePages() {
-  const pages = [];
-  let cursor;
-
-  do {
-    const response = await notion.databases.query({
-      database_id: CCF_TEMPLATE_DB_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
-
-    pages.push(...response.results);
-    cursor = response.has_more ? response.next_cursor : undefined;
-  } while (cursor);
-
-  return pages;
-}
-
-function getTitle(page) {
-  for (const value of Object.values(page.properties)) {
-    if (value.type === 'title' && value.title.length > 0) {
-      return value.title[0].plain_text;
-    }
-  }
-  return 'Untitled';
-}
-
-function getSelectName(page, propertyName) {
-  const prop = page.properties[propertyName];
-  if (!prop || prop.type !== 'select' || !prop.select) return null;
-  return prop.select.name;
-}
-
-function getNumber(page, propertyName) {
-  const prop = page.properties[propertyName];
-  if (!prop || prop.type !== 'number') return null;
-  return prop.number;
-}
-
-async function duplicateTasksForClient(clientPageId, templatePages) {
-  for (const template of templatePages) {
-    const title = getTitle(template);
-    const status = getSelectName(template, 'Status');
-    const onboardingStage = getSelectName(template, 'Onboarding Stage');
-    const number = getNumber(template, '#');
-
-    const properties = {
-      'Name': {
-        title: [{ text: { content: title } }],
-      },
-      'Client': {
-        relation: [{ id: clientPageId }],
-      },
-    };
-
-    if (status) {
-      properties['Status'] = { select: { name: status } };
-    }
-
-    if (onboardingStage) {
-      properties['Onboarding Stage'] = { select: { name: onboardingStage } };
-    }
-
-    if (number !== null) {
-      properties['#'] = { number };
-    }
-
+async function createTasksForClient(clientPageId) {
+  for (const task of CCF_TASKS) {
     await notion.pages.create({
       parent: { database_id: TASK_DB_ID },
-      properties,
+      properties: {
+        'Name': {
+          title: [{ text: { content: task.name } }],
+        },
+        'Client': {
+          relation: [{ id: clientPageId }],
+        },
+        'Status': {
+          select: { name: 'To do' },
+        },
+        'Onboarding Stage': {
+          select: { name: task.stage },
+        },
+        '#': {
+          number: task.number,
+        },
+      },
     });
 
-    console.log(`[ccf] Created task #${number} "${title}" [${onboardingStage}] for client ${clientPageId}`);
+    console.log(`[ccf] Created task #${task.number} "${task.name}" [${task.stage}]`);
   }
 }
 
@@ -126,18 +121,15 @@ async function syncCCF() {
 
   if (triggeredClients.length === 0) return { triggered: 0 };
 
-  const templatePages = await getCCFTemplatePages();
-  console.log(`[ccf] Found ${templatePages.length} template page(s)`);
-
   for (const client of triggeredClients) {
     const clientName = client.properties?.['Name']?.title?.[0]?.plain_text || client.id;
     console.log(`[ccf] Processing client: ${clientName}`);
 
-    await duplicateTasksForClient(client.id, templatePages);
+    await createTasksForClient(client.id);
     await markClientDone(client.id);
   }
 
-  return { triggered: triggeredClients.length, tasksCreated: triggeredClients.length * templatePages.length };
+  return { triggered: triggeredClients.length, tasksCreated: triggeredClients.length * CCF_TASKS.length };
 }
 
 module.exports = { syncCCF };
