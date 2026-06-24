@@ -19,26 +19,17 @@ const STAGES = [
 const FILLED = '🟩';
 const EMPTY  = '⬜';
 
-// Derive stage from which tasks are still pending (not Done, not archived).
-// Tasks that are archived (Done + archived in Notion) disappear from the DB,
-// so we infer completion from absence rather than presence of a Done status.
-// ccfRun: whether CCF was triggered for this client (so absence = done, not "never created")
 function deriveStage(pendingNumbers, ccfRun) {
-  if (!ccfRun) return 0; // CCF not triggered yet → Onboarding
-
-  // All tasks archived/done
-  if (pendingNumbers.size === 0) return 5; // Live
-
-  // A task is "complete" if it is NOT pending (either Done in DB or archived)
+  if (!ccfRun) return 0;
+  if (pendingNumbers.size === 0) return 5;
   const done = (num) => !pendingNumbers.has(num);
   const pending = (num) => pendingNumbers.has(num);
-
-  if (done(23)) return 5; // Launch done → Live
-  if (done(26)) return 4; // Confirmation Message done → Ready For Launch
-  if (done(20)) return 3; // Ad Creatives Approved done → Launch Preparation
-  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2; // Creative Production
-  if (done(6)) return 1;  // Strategy done → Build
-  return 0;               // Onboarding
+  if (done(23)) return 5;
+  if (done(26)) return 4;
+  if (done(20)) return 3;
+  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2;
+  if (done(6)) return 1;
+  return 0;
 }
 
 function progressBar(stageIndex) {
@@ -80,9 +71,7 @@ async function updateProgressTracker() {
 
   const [tasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
-  // Build pending tasks per client (tasks that exist and are NOT Done).
-  // Done+archived tasks are absent from the DB entirely — their absence signals completion.
-  const pendingMap = new Map(); // Map<clientId, Map<taskNumber, taskName>>
+  const pendingMap = new Map();
   for (const task of tasks) {
     const status = task.properties['Status']?.select?.name ?? '';
     if (status === 'Done') continue;
@@ -105,7 +94,6 @@ async function updateProgressTracker() {
     const pendingNumbers = new Set(pendingTaskMap.keys());
     const stageIndex = deriveStage(pendingNumbers, ccfRun);
 
-    // Next urgent task = lowest-numbered pending task (workflow order)
     let nextTask = null;
     if (pendingTaskMap.size > 0) {
       const lowestNum = Math.min(...pendingTaskMap.keys());
@@ -117,9 +105,10 @@ async function updateProgressTracker() {
 
   rows.sort((a, b) => b.stageIndex - a.stageIndex);
 
-  // Clear existing children of the tracker block
+  // Clear existing children, skipping any already-archived blocks
   const existing = await notion.blocks.children.list({ block_id: TRACKER_BLOCK_ID });
   for (const block of existing.results) {
+    if (block.archived) continue;
     await notion.blocks.delete({ block_id: block.id });
   }
 
