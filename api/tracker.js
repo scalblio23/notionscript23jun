@@ -24,11 +24,11 @@ function deriveStage(pendingNumbers, ccfRun) {
   if (pendingNumbers.size === 0) return 5;
   const done = (num) => !pendingNumbers.has(num);
   const pending = (num) => pendingNumbers.has(num);
-  if (done(23)) return 5;
-  if (done(26)) return 4;
-  if (done(20)) return 3;
-  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2;
-  if (done(6)) return 1;
+  if (done(23)) return 5; // Launch done → Live
+  if (done(25)) return 4; // Final Details done → Ready For Launch
+  if (done(20)) return 3; // Ad Creatives Approved done → Launch Preparation
+  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2; // Creative Production
+  if (done(6)) return 1;  // Strategy done → Build
   return 0;
 }
 
@@ -105,7 +105,6 @@ async function updateProgressTracker() {
 
   rows.sort((a, b) => b.stageIndex - a.stageIndex);
 
-  // Clear existing children, skipping any already-archived blocks
   const existing = await notion.blocks.children.list({ block_id: TRACKER_BLOCK_ID });
   for (const block of existing.results) {
     if (block.archived) continue;

@@ -14,10 +14,9 @@ const TASK_DEPENDENCIES = {
   20: [13, 14, 15],
   21: [13, 14, 15],
   25: [1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20,21,22,24],
-  26: [25],
   28: [21, 16, 15, 17, 12, 10],
   29: [21, 16, 15, 17, 12, 10],
-  23: [26, 15, 16, 13, 14],
+  23: [25, 15, 16, 13, 14],
   30: [6], 31: [6], 32: [6], 33: [6], 34: [6],
 };
 
@@ -110,7 +109,7 @@ function deriveStageIndex(pendingNumbers, ccfRun) {
   const done = (num) => !pendingNumbers.has(num);
   const pending = (num) => pendingNumbers.has(num);
   if (done(23)) return 5;
-  if (done(26)) return 4;
+  if (done(25)) return 4; // Final Details done → Ready For Launch
   if (done(20)) return 3;
   if (done(6) && (pending(13) || pending(14) || pending(15))) return 2;
   if (done(6)) return 1;
