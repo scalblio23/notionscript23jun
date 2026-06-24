@@ -123,21 +123,13 @@ async function updateProgressTracker() {
     return { clientsTracked: 0 };
   }
 
-  const children = rows.flatMap(({ name, stageIndex }) => {
+  const children = rows.map(({ name, stageIndex }) => {
     const bar = progressBar(stageIndex);
     const stageName = STAGES[stageIndex];
-    return [
-      {
-        paragraph: {
-          rich_text: [{ text: { content: name }, annotations: { bold: true } }],
-        },
-      },
-      {
-        paragraph: {
-          rich_text: [{ text: { content: `${bar}  ${stageName}` } }],
-        },
-      },
-    ];
+    const line = `${name.padEnd(22)}${bar}  ${stageName}`;
+    return {
+      paragraph: { rich_text: [{ text: { content: line } }] },
+    };
   });
 
   await notion.blocks.children.append({ block_id: TRACKER_BLOCK_ID, children });
