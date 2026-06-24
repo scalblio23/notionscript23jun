@@ -168,17 +168,19 @@ async function safeDeleteBlock(blockId) {
 async function deleteAllChildren(blockId) {
   let cursor;
   let total = 0;
-  let deleted = 0;
   do {
     const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
     total += res.results.length;
-    for (const block of res.results) {
-      await safeDeleteBlock(block.id);
-      deleted++;
-    }
+    await Promise.all(res.results.map(b => safeDeleteBlock(b.id)));
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
-  console.log(`[pendingBoard] Cleared ${deleted}/${total} existing block(s)`);
+  // Verify block is empty before returning
+  const check = await notion.blocks.children.list({ block_id: blockId, page_size: 1 });
+  if (check.results.length > 0) {
+    await deleteAllChildren(blockId);
+  } else {
+    console.log(`[pendingBoard] Cleared ${total} block(s)`);
+  }
 }
 
 async function updatePendingBoard() {
@@ -224,7 +226,6 @@ async function updatePendingBoard() {
 
     const score = calcEfficiencyScore(eligibleTasks, startDate, today);
 
-    // Format: Client - Day X - SCORE% - Tasks today: A, B - Overdue: N (Example) - Upcoming: N
     const todayText = dueToday.length > 0
       ? dueToday.slice(0, 2).map(getTaskShortName).join(', ') + (dueToday.length > 2 ? ` +${dueToday.length - 2} more` : '')
       : 'None';
@@ -233,7 +234,7 @@ async function updatePendingBoard() {
       ? `${overdue.length} (e.g. ${getTaskShortName(overdue[0])})`
       : 'None';
 
-    const upcomingText = upcoming.length > 0 ? `${upcoming.length}` : '0';
+    const upcomingText = `${upcoming.length}`;
 
     const prefix = `${name} - Day ${daysOld ?? '?'} - `;
     const suffix = `  |  Tasks today: ${todayText}  |  Overdue: ${overdueText}  |  Upcoming: ${upcomingText}`;
