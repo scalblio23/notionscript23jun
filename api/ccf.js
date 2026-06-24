@@ -37,6 +37,7 @@ async function getCCFTemplatePages() {
   do {
     const response = await notion.databases.query({
       database_id: CCF_TEMPLATE_DB_ID,
+      sorts: [{ property: '#', direction: 'ascending' }],
       start_cursor: cursor,
       page_size: 100,
     });
@@ -57,23 +58,52 @@ function getTitle(page) {
   return 'Untitled';
 }
 
+function getSelectName(page, propertyName) {
+  const prop = page.properties[propertyName];
+  if (!prop || prop.type !== 'select' || !prop.select) return null;
+  return prop.select.name;
+}
+
+function getNumber(page, propertyName) {
+  const prop = page.properties[propertyName];
+  if (!prop || prop.type !== 'number') return null;
+  return prop.number;
+}
+
 async function duplicateTasksForClient(clientPageId, templatePages) {
   for (const template of templatePages) {
     const title = getTitle(template);
+    const status = getSelectName(template, 'Status');
+    const onboardingStage = getSelectName(template, 'Onboarding Stage');
+    const number = getNumber(template, '#');
+
+    const properties = {
+      'Name': {
+        title: [{ text: { content: title } }],
+      },
+      'Client': {
+        relation: [{ id: clientPageId }],
+      },
+    };
+
+    if (status) {
+      properties['Status'] = { select: { name: status } };
+    }
+
+    if (onboardingStage) {
+      properties['Onboarding Stage'] = { select: { name: onboardingStage } };
+    }
+
+    if (number !== null) {
+      properties['#'] = { number };
+    }
 
     await notion.pages.create({
       parent: { database_id: TASK_DB_ID },
-      properties: {
-        'Name': {
-          title: [{ text: { content: title } }],
-        },
-        'Client': {
-          relation: [{ id: clientPageId }],
-        },
-      },
+      properties,
     });
 
-    console.log(`[ccf] Created task "${title}" for client ${clientPageId}`);
+    console.log(`[ccf] Created task #${number} "${title}" [${onboardingStage}] for client ${clientPageId}`);
   }
 }
 
