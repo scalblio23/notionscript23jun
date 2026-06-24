@@ -188,25 +188,34 @@ function deriveCommsRequired(eligibleTasks) {
   return null;
 }
 
+function getScoreColor(score) {
+  if (score <= 33) return 'red';
+  if (score <= 66) return 'yellow';
+  return 'green';
+}
+
 function buildCard({ name, daysOld, comms, overdue, dueToday, upcoming, score }) {
-  const lines = [];
-
-  lines.push(`📅 Day ${daysOld ?? '?'}   📊 Score: ${score}%`);
-  if (comms) lines.push(`💬 ${comms}`);
-  lines.push('');
-
+  const bodyLines = [];
+  if (comms) bodyLines.push(`💬 ${comms}`);
+  bodyLines.push('');
   if (overdue.length > 0) {
-    lines.push(`⚠️ Overdue (${overdue.length}): ${overdue.map(getTaskShortName).join(', ')}`);
+    bodyLines.push(`⚠️ Overdue (${overdue.length}): ${overdue.map(getTaskShortName).join(', ')}`);
   }
   if (dueToday.length > 0) {
-    lines.push(`✅ Due Today (${dueToday.length}): ${dueToday.map(getTaskShortName).join(', ')}`);
+    bodyLines.push(`✅ Due Today (${dueToday.length}): ${dueToday.map(getTaskShortName).join(', ')}`);
   }
   if (upcoming.length > 0) {
-    lines.push(`📌 Upcoming: ${getTaskShortName(upcoming[0])}`);
+    bodyLines.push(`📌 Upcoming: ${getTaskShortName(upcoming[0])}`);
   }
   if (overdue.length === 0 && dueToday.length === 0 && upcoming.length === 0) {
-    lines.push('✓ Clear');
+    bodyLines.push('✓ Clear');
   }
+
+  const richText = [
+    { text: { content: `📅 Day ${daysOld ?? '?'}   ` } },
+    { text: { content: `📊 Score: ${score}%` }, annotations: { color: getScoreColor(score) } },
+    { text: { content: '\n' + bodyLines.join('\n') } },
+  ];
 
   return {
     type: 'callout',
@@ -216,7 +225,7 @@ function buildCard({ name, daysOld, comms, overdue, dueToday, upcoming, score })
       color: 'default',
       children: [{
         type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: lines.join('\n') } }] },
+        paragraph: { rich_text: richText },
       }],
     },
   };
