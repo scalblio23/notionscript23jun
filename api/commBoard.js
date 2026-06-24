@@ -1,6 +1,9 @@
 const { Client } = require('@notionhq/client');
+const Anthropic = require('@anthropic-ai/sdk');
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
 const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const COMM_BOARD_BLOCK_ID = '38924f67814f80f49992d1f780f379ab';
@@ -55,6 +58,18 @@ function getStartDate(client) {
   return d;
 }
 
+function getDaysOld(client) {
+  const prop = client.properties['Days Old'];
+  if (!prop) return null;
+  if (prop.type === 'number') return prop.number;
+  if (prop.type === 'formula') {
+    const f = prop.formula;
+    if (f?.type === 'number') return f.number + 1;
+    return f?.number ?? null;
+  }
+  return null;
+}
+
 function buildDoneMap(allTasks) {
   const doneMap = new Map();
   for (const page of allTasks) {
@@ -99,23 +114,36 @@ function isEditedToday(page, today) {
   if (!edited) return false;
   const d = new Date(edited);
   d.setHours(0, 0, 0, 0);
-  // compare using same timezone-adjusted today
   return d.getTime() === today.getTime() || d.getTime() === today.getTime() - 86400000;
 }
 
-function buildClientBlock(name, doing, done) {
-  const lines = [];
-  if (doing.length > 0) {
-    lines.push('▶ Doing');
-    doing.forEach(t => lines.push(`  • ${t}`));
-  }
-  if (done.length > 0) {
-    if (lines.length > 0) lines.push('');
-    lines.push('✓ Done today');
-    done.forEach(t => lines.push(`  • ${t}`));
-  }
-  if (lines.length === 0) lines.push('— Nothing active');
+async function generateNarrative(clientName, daysOld, doing, done) {
+  const doingList = doing.length > 0 ? doing.join(', ') : 'none';
+  const doneList = done.length > 0 ? done.join(', ') : 'none';
 
+  const prompt = `You are writing a brief internal status update for a client onboarding agency's communication board. Keep it to 2-3 sentences. Be direct and operational — no fluff. Write in present tense as if briefing a team member.
+
+Client: ${clientName}
+Day: ${daysOld ?? 'unknown'} of onboarding
+Tasks active/due today: ${doingList}
+Completed today: ${doneList}
+
+Write a short narrative summary of where things stand for this client today.`;
+
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 150,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    return msg.content[0]?.text?.trim() ?? `${doing.length} task(s) active, ${done.length} completed today.`;
+  } catch (err) {
+    console.error(`[commBoard] LLM error for ${clientName}:`, err.message);
+    return `Active: ${doingList}. Completed today: ${doneList}.`;
+  }
+}
+
+function buildClientBlock(name, narrative) {
   return {
     type: 'callout',
     callout: {
@@ -124,7 +152,7 @@ function buildClientBlock(name, doing, done) {
       color: 'default',
       children: [{
         type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: lines.join('\n') } }] },
+        paragraph: { rich_text: [{ text: { content: narrative } }] },
       }],
     },
   };
@@ -174,7 +202,7 @@ async function updateCommBoard() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  today.setDate(today.getDate() + 1); // UTC → local timezone offset
+  today.setDate(today.getDate() + 1);
 
   const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
@@ -189,14 +217,14 @@ async function updateCommBoard() {
     c => c.properties['Onboarding Status']?.select?.name === 'Onboarding Complete'
   );
 
-  function buildClientCards(clientList) {
+  async function buildClientCards(clientList) {
     const cards = [];
     for (const client of clientList) {
       const clientId = client.id;
       const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
       const startDate = getStartDate(client);
+      const daysOld = getDaysOld(client);
 
-      // Tasks due today or overdue that are still open and eligible
       const doing = openTasks
         .filter(t => getClientId(t) === clientId)
         .filter(t => isEligible(t, doneMap))
@@ -207,21 +235,23 @@ async function updateCommBoard() {
         })
         .map(getTaskShortName);
 
-      // Tasks marked Done with last_edited_time today
       const done = doneTasks
         .filter(t => getClientId(t) === clientId)
         .filter(t => isEditedToday(t, today))
         .map(getTaskShortName);
 
-      if (doing.length > 0 || done.length > 0) {
-        cards.push(buildClientBlock(name, doing, done));
-      }
+      if (doing.length === 0 && done.length === 0) continue;
+
+      const narrative = await generateNarrative(name, daysOld, doing, done);
+      cards.push(buildClientBlock(name, narrative));
     }
     return cards;
   }
 
-  const onboardingCards = buildClientCards(onboardingClients);
-  const activeCards = buildClientCards(activeClients);
+  const [onboardingCards, activeCards] = await Promise.all([
+    buildClientCards(onboardingClients),
+    buildClientCards(activeClients),
+  ]);
 
   const existing = await notion.blocks.children.list({ block_id: COMM_BOARD_BLOCK_ID });
   for (const block of existing.results) {
@@ -236,7 +266,7 @@ async function updateCommBoard() {
       },
       ...(cards.length > 0 ? cards : [{
         type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: 'Nothing active' } }] },
+        paragraph: { rich_text: [{ text: { content: 'Nothing active today.' } }] },
       }]),
     ];
     return { type: 'column', column: { children } };
