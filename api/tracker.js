@@ -24,25 +24,16 @@ function deriveStage(pendingNumbers, ccfRun) {
   if (pendingNumbers.size === 0) return 5;
   const done = (num) => !pendingNumbers.has(num);
   const pending = (num) => pendingNumbers.has(num);
-  if (done(23)) return 5;
-  if (done(25)) return 4;
-  if (done(20)) return 3;
-  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2;
-  if (done(6)) return 1;
+  if (done(23)) return 5; // Launch done → Live
+  if (done(25)) return 4; // Final Details done → Ready For Launch
+  if (done(20)) return 3; // Ad Creatives Approved done → Launch Preparation
+  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2; // Creative Production
+  if (done(6)) return 1;  // Strategy done → Build
   return 0;
 }
 
 function progressBar(stageIndex) {
   return STAGES.map((_, i) => i <= stageIndex ? FILLED : EMPTY).join('');
-}
-
-async function safeDeleteBlock(blockId) {
-  try {
-    await notion.blocks.delete({ block_id: blockId });
-  } catch (err) {
-    if (err.code === 'validation_error') return; // already archived
-    throw err;
-  }
 }
 
 async function getAllTasks() {
@@ -73,6 +64,15 @@ async function getAllClients() {
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
   return pages;
+}
+
+async function safeDeleteBlock(blockId) {
+  try {
+    await notion.blocks.delete({ block_id: blockId });
+  } catch (err) {
+    if (err.code === 'validation_error') return;
+    throw err;
+  }
 }
 
 async function updateProgressTracker() {
@@ -122,7 +122,9 @@ async function updateProgressTracker() {
   if (rows.length === 0) {
     await notion.blocks.children.append({
       block_id: TRACKER_BLOCK_ID,
-      children: [{ paragraph: { rich_text: [{ text: { content: 'No clients found.' } }] } }],
+      children: [{
+        paragraph: { rich_text: [{ text: { content: 'No clients found.' } }] },
+      }],
     });
     return { clientsTracked: 0 };
   }
@@ -132,7 +134,9 @@ async function updateProgressTracker() {
     const stageName = STAGES[stageIndex];
     const next = nextTask ? `  →  ${nextTask}` : '';
     const line = `${name.padEnd(22)}${bar}  ${stageName}${next}`;
-    return { paragraph: { rich_text: [{ text: { content: line } }] } };
+    return {
+      paragraph: { rich_text: [{ text: { content: line } }] },
+    };
   });
 
   await notion.blocks.children.append({ block_id: TRACKER_BLOCK_ID, children });

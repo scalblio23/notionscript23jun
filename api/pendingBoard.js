@@ -3,7 +3,7 @@ const { Client } = require('@notionhq/client');
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
-const BOARD_BLOCK_ID = '38924f67814f801d920fdcbb47de9399';
+const BOARD_BLOCK_ID = '38924f67814f80988b67c5b861660521';
 
 const ROLES = ['CSM Assistant', 'Operator', 'Founder', 'Creative'];
 
@@ -33,15 +33,6 @@ const TASK_DEPENDENCIES = {
   23: [25, 15, 16, 13, 14],
   30: [6], 31: [6], 32: [6], 33: [6], 34: [6],
 };
-
-async function safeDeleteBlock(blockId) {
-  try {
-    await notion.blocks.delete({ block_id: blockId });
-  } catch (err) {
-    if (err.code === 'validation_error') return;
-    throw err;
-  }
-}
 
 function getTaskNumber(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
@@ -142,19 +133,28 @@ function deriveCommsRequired(eligibleTasks) {
 
 function buildCard({ name, daysOld, nextByRole, comms }) {
   const lines = [];
+
   if (daysOld !== null) lines.push(`📅 Day ${daysOld}`);
   if (comms) lines.push(`💬 ${comms}`);
+
   for (const role of ROLES) {
-    if (nextByRole[role]) lines.push(`${ROLE_EMOJI[role]} ${nextByRole[role]}`);
+    if (nextByRole[role]) {
+      lines.push(`${ROLE_EMOJI[role]} ${nextByRole[role]}`);
+    }
   }
+
   const bodyText = lines.length > 0 ? lines.join('\n') : '✓ Clear';
+
   return {
     type: 'callout',
     callout: {
       rich_text: [{ text: { content: name } }],
       icon: { emoji: '⚫' },
       color: 'default',
-      children: [{ type: 'paragraph', paragraph: { rich_text: [{ text: { content: bodyText } }] } }],
+      children: [{
+        type: 'paragraph',
+        paragraph: { rich_text: [{ text: { content: bodyText } }] },
+      }],
     },
   };
 }
@@ -163,7 +163,11 @@ async function getAllTasks() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({ database_id: TASK_DB_ID, start_cursor: cursor, page_size: 100 });
+    const res = await notion.databases.query({
+      database_id: TASK_DB_ID,
+      start_cursor: cursor,
+      page_size: 100,
+    });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
@@ -174,38 +178,57 @@ async function getAllClients() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({ database_id: CLIENT_DB_ID, start_cursor: cursor, page_size: 100 });
+    const res = await notion.databases.query({
+      database_id: CLIENT_DB_ID,
+      start_cursor: cursor,
+      page_size: 100,
+    });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
   return pages;
 }
 
+async function safeDeleteBlock(blockId) {
+  try {
+    await notion.blocks.delete({ block_id: blockId });
+  } catch (err) {
+    if (err.code === 'validation_error') return;
+    throw err;
+  }
+}
+
 async function updatePendingBoard() {
   console.log('[pendingBoard] Building pending client board...');
 
   const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
+
   const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
   const doneMap = buildDoneMap(allTasks);
 
   const pendingClients = clients.filter(c =>
     c.properties['Onboarding Status']?.select?.name === 'Pending'
   );
+
   console.log(`[pendingBoard] ${pendingClients.length} pending client(s)`);
 
   const cards = pendingClients.map(client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const daysOld = getDaysOld(client);
+
     const eligibleTasks = openTasks
       .filter(t => getClientId(t) === clientId)
       .filter(t => isEligible(t, doneMap));
+
     eligibleTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
+
     const nextByRole = {};
     for (const role of ROLES) {
       const task = eligibleTasks.find(t => getPrimaryRole(t) === role);
       if (task) nextByRole[role] = task.properties['Name']?.title?.[0]?.plain_text ?? '';
     }
+
     const comms = deriveCommsRequired(eligibleTasks);
     return { name, daysOld, nextByRole, comms };
   });
@@ -223,18 +246,23 @@ async function updatePendingBoard() {
     return { clientsShown: 0 };
   }
 
+  // Pair cards into rows of 2 using column_list
   const rows = [];
   for (let i = 0; i < cards.length; i += 2) {
     const pair = cards.slice(i, i + 2);
     rows.push({
       type: 'column_list',
       column_list: {
-        children: pair.map(card => ({ type: 'column', column: { children: [buildCard(card)] } })),
+        children: pair.map(card => ({
+          type: 'column',
+          column: { children: [buildCard(card)] },
+        })),
       },
     });
   }
 
   await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: rows });
+
   console.log(`[pendingBoard] Board updated with ${cards.length} client(s)`);
   return { clientsShown: cards.length };
 }
