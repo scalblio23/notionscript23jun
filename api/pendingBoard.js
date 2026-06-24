@@ -14,6 +14,15 @@ const ROLE_EMOJI = {
   'Creative':      '🦕',
 };
 
+// Ordered onboarding stages — earliest stage with pending tasks = message to send
+const STAGE_MESSAGES = [
+  { stage: 'Onboarding',    message: 'Send Onboarding Message' },
+  { stage: 'Day 1',         message: 'Send Day 1 Message' },
+  { stage: 'Day 2',         message: 'Send Day 2 Message' },
+  { stage: 'Day 3',         message: 'Send Day 3 Message' },
+  { stage: 'Client Assets', message: 'Request Client Assets' },
+];
+
 const TASK_DEPENDENCIES = {
   7:  [6],
   10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 17: [6],
@@ -38,6 +47,10 @@ function getClientId(page) {
 
 function getPrimaryRole(page) {
   return page.properties['Role']?.multi_select?.[0]?.name ?? null;
+}
+
+function getOnboardingStage(page) {
+  return page.properties['Onboarding Stage']?.select?.name ?? null;
 }
 
 function buildDoneMap(allTasks) {
@@ -103,6 +116,14 @@ function calcPriorityScore(page) {
     + taskPriorityRank * 1000;
 }
 
+function deriveCommsRequired(eligibleTasks) {
+  const pendingStages = new Set(eligibleTasks.map(t => getOnboardingStage(t)).filter(Boolean));
+  for (const { stage, message } of STAGE_MESSAGES) {
+    if (pendingStages.has(stage)) return message;
+  }
+  return null;
+}
+
 async function getAllTasks() {
   const pages = [];
   let cursor;
@@ -165,7 +186,9 @@ async function updatePendingBoard() {
       }
     }
 
-    return { name, nextByRole };
+    const comms = deriveCommsRequired(eligibleTasks);
+
+    return { name, nextByRole, comms };
   });
 
   const existing = await notion.blocks.children.list({ block_id: BOARD_BLOCK_ID });
@@ -185,14 +208,20 @@ async function updatePendingBoard() {
     return { clientsShown: 0 };
   }
 
-  const children = cards.map(({ name, nextByRole }) => {
-    const roleLines = ROLES
-      .filter(role => nextByRole[role])
-      .map(role => `${ROLE_EMOJI[role]}  ${role.padEnd(16)}→  ${nextByRole[role]}`);
+  const children = cards.map(({ name, nextByRole, comms }) => {
+    const lines = [];
 
-    const bodyText = roleLines.length > 0
-      ? roleLines.join('\n')
-      : '✓ No pending tasks';
+    if (comms) {
+      lines.push(`💬  Comms Required     →  ${comms}`);
+    }
+
+    for (const role of ROLES) {
+      if (nextByRole[role]) {
+        lines.push(`${ROLE_EMOJI[role]}  ${role.padEnd(16)}→  ${nextByRole[role]}`);
+      }
+    }
+
+    const bodyText = lines.length > 0 ? lines.join('\n') : '✓ No pending tasks';
 
     return {
       type: 'callout',
@@ -202,9 +231,7 @@ async function updatePendingBoard() {
         color: 'blue_background',
         children: [{
           type: 'paragraph',
-          paragraph: {
-            rich_text: [{ text: { content: bodyText } }],
-          },
+          paragraph: { rich_text: [{ text: { content: bodyText } }] },
         }],
       },
     };
