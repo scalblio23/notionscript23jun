@@ -27,6 +27,37 @@ const TASK_DEPENDENCIES = {
   30: [6], 31: [6], 32: [6], 33: [6], 34: [6],
 };
 
+// Maps task short names (lowercase keywords) to in-progress descriptions
+const TASK_PHRASES = [
+  { match: /terms/i,        phrase: 'sorting out your onboarding paperwork' },
+  { match: /dashboard/i,   phrase: 'setting up your dashboard' },
+  { match: /whatsapp/i,    phrase: 'getting your WhatsApp set up' },
+  { match: /strategy/i,    phrase: 'working on your strategy' },
+  { match: /creative/i,    phrase: 'putting together your ad creatives' },
+  { match: /ad.*build|build.*ad/i, phrase: 'building your ads' },
+  { match: /copy/i,        phrase: 'writing your ad copy' },
+  { match: /campaign/i,    phrase: 'building your campaign' },
+  { match: /audience/i,    phrase: 'researching your target audience' },
+  { match: /pixel/i,       phrase: 'setting up your tracking pixel' },
+  { match: /account/i,     phrase: 'setting up your ad account' },
+  { match: /access/i,      phrase: 'getting your account access sorted' },
+  { match: /onboard/i,     phrase: 'working through your onboarding' },
+  { match: /brief/i,       phrase: 'going through your brief' },
+  { match: /research/i,    phrase: 'doing research for your campaign' },
+  { match: /launch/i,      phrase: 'preparing for your launch' },
+  { match: /report/i,      phrase: 'putting together your report' },
+  { match: /asset/i,       phrase: 'getting your assets together' },
+  { match: /message/i,     phrase: 'checking in on your progress' },
+  { match: /call/i,        phrase: 'preparing for your next call' },
+];
+
+function taskToPhrase(taskName) {
+  for (const { match, phrase } of TASK_PHRASES) {
+    if (match.test(taskName)) return phrase;
+  }
+  return `working on your ${taskName.toLowerCase()}`;
+}
+
 function getTaskNumber(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
   const match = title.match(/^(\d+)\s*-/);
@@ -100,42 +131,30 @@ function isEligible(page, doneMap) {
   return deps.every(d => doneTasks.has(d));
 }
 
-async function generateMessage(clientName, daysOld, tasks) {
-  const taskList = tasks.join(', ');
-  const prompt = `You write short WhatsApp messages on behalf of an Australian digital marketing agency, sent TO clients as progress updates.
+async function generateMessage(clientName, daysOld, phrases) {
+  const activity = phrases.join(', ');
+  const prompt = `You write short WhatsApp messages on behalf of an Australian digital marketing agency, sent TO clients as progress updates. These are things we are CURRENTLY working on for them — not done yet.
 
-IMPORTANT: The task names below are INTERNAL agency to-do items that are currently in progress — they have NOT been completed yet. Do NOT say we have done them. Instead, write about what we ARE doing or WILL do for the client today.
-
-For example:
-- "Get Terms Signed" → we are sorting out the paperwork / finalising the agreement
-- "Build Ad Creative" → we are working on their ads / putting together their creatives
-- "Strategy Call" → we are preparing their strategy
-- "Send Day 1 Message" → we are checking in on their progress
-
-Common openers to mix and match (pick one that fits naturally):
+Openers (pick one):
 - "Just to give you an idea on what we are working on today..."
 - "Here's a quick update"
-- "Hey [name], today we're going over [topic]"
-- "Hey [name]" (simple, direct)
+- "Hey ${clientName}, today we're working on [topic]"
+- "Hey ${clientName}"
 
-Common closers to mix and match (pick one that fits naturally):
+Closers (pick one):
 - "Will keep you posted"
 - "Let me know if you have any questions"
 - "Will keep you updated"
 
-Style rules:
+Rules:
 - Max 15 words total
-- Casual, direct, friendly — like texting a mate
-- Use "will" or "working on" statements — never past tense claiming completion
-- No corporate speak, no fluff
-- No more than one emoji, often none
-- Australian informal tone
-- Pick ONE opener and ONE closer that feel natural together — don't use both if it pushes past 15 words
+- Casual Australian tone, like texting a mate
+- Use present/future tense only ("working on", "will") — never past tense
+- No corporate speak, no fluff, max one emoji
 
-Client: ${clientName} (day ${daysOld ?? '?'} of onboarding)
-Internal tasks in progress for them: ${taskList}
+What we are currently working on for ${clientName} (day ${daysOld ?? '?'}): ${activity}
 
-Write the update message. 15 words max. Nothing else.`;
+Write the message. 15 words max. Nothing else.`;
 
   try {
     const msg = await anthropic.messages.create({
@@ -143,7 +162,7 @@ Write the update message. 15 words max. Nothing else.`;
       max_tokens: 60,
       messages: [{ role: 'user', content: prompt }],
     });
-    return msg.content[0]?.text?.trim() ?? taskList;
+    return msg.content[0]?.text?.trim() ?? activity;
   } catch (err) {
     console.error(`[commBoard] LLM error for ${clientName}:`, err.message);
     return `Hey ${clientName}, working on your setup today. Will keep you updated.`;
@@ -259,9 +278,9 @@ async function updateCommBoard() {
       return d >= 0;
     });
 
-    const taskNames = todayTasks.map(getTaskShortName);
-    return { name, daysOld, taskNames };
-  }).filter(c => c.taskNames.length > 0);
+    const phrases = [...new Set(todayTasks.map(t => taskToPhrase(getTaskShortName(t))))]; 
+    return { name, daysOld, phrases };
+  }).filter(c => c.phrases.length > 0);
 
   await deleteAllChildren(COMM_BOARD_BLOCK_ID);
 
@@ -274,7 +293,7 @@ async function updateCommBoard() {
   }
 
   const messages = await Promise.all(
-    clientData.map(({ name, daysOld, taskNames }) => generateMessage(name, daysOld, taskNames))
+    clientData.map(({ name, daysOld, phrases }) => generateMessage(name, daysOld, phrases))
   );
 
   const blocks = clientData.map(({ name }, i) => buildTodoBlock(name, messages[i]));
