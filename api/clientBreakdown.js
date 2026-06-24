@@ -233,6 +233,7 @@ async function syncClientBreakdown() {
 
   // Assign Client Slot numbers: divider gets slot N, client tasks follow sequentially
   const updates = []; // { id, slot }
+  const assignedIds = new Set(); // all task IDs that should keep a slot
   let slotCounter = 1;
 
   for (const { clientId, name } of clientMeta) {
@@ -243,7 +244,7 @@ async function syncClientBreakdown() {
 
     // Create divider if missing
     if (!existingDividersByName.has(divName)) {
-      const created = await notion.pages.create({
+      await notion.pages.create({
         parent: { database_id: DATABASE_ID },
         properties: {
           'Name': { title: [{ text: { content: divName } }] },
@@ -263,6 +264,7 @@ async function syncClientBreakdown() {
 
     // Assign slots to client tasks
     for (const task of tasks) {
+      assignedIds.add(task.id);
       const currentSlot = task.properties['Client Slot']?.number ?? null;
       if (currentSlot !== slotCounter) {
         updates.push({ id: task.id, slot: slotCounter });
@@ -272,7 +274,6 @@ async function syncClientBreakdown() {
   }
 
   // Clear Client Slot for open tasks not assigned in this run
-  const assignedIds = new Set(updates.map(u => u.id));
   for (const task of openTasks) {
     if (!assignedIds.has(task.id)) {
       const currentSlot = task.properties['Client Slot']?.number ?? null;
