@@ -3,7 +3,7 @@ const { Client } = require('@notionhq/client');
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
-const BOARD_BLOCK_ID = '38924f67814f80988b67c5b861660521';
+const BOARD_BLOCK_ID = '38924f67814f805aa2fed5efafe2d562';
 
 const STAGE_MESSAGES = [
   { stage: 'Onboarding',    message: 'Send Onboarding Message' },
@@ -248,21 +248,27 @@ async function getAllClients() {
 async function safeDeleteBlock(blockId) {
   try {
     await notion.blocks.delete({ block_id: blockId });
+    return true;
   } catch (err) {
-    if (err.code === 'validation_error') return;
+    if (err.code === 'validation_error') return false;
     throw err;
   }
 }
 
 async function deleteAllChildren(blockId) {
   let cursor;
+  let total = 0;
+  let deleted = 0;
   do {
     const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
+    total += res.results.length;
     for (const block of res.results) {
-      await safeDeleteBlock(block.id);
+      const ok = await safeDeleteBlock(block.id);
+      if (ok) deleted++;
     }
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
+  console.log(`[pendingBoard] Cleared ${deleted}/${total} existing block(s)`);
 }
 
 async function updatePendingBoard() {
