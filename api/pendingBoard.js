@@ -56,7 +56,13 @@ function getDaysOld(client) {
   const prop = client.properties['Days Old'];
   if (!prop) return null;
   if (prop.type === 'number') return prop.number;
-  if (prop.type === 'formula') return prop.formula?.number ?? null;
+  if (prop.type === 'formula') {
+    const f = prop.formula;
+    if (f?.type === 'number') return f.number;
+    if (f?.type === 'string') return parseFloat(f.string) || null;
+    return f?.number ?? null;
+  }
+  if (prop.type === 'rollup') return prop.rollup?.number ?? null;
   return null;
 }
 
@@ -216,6 +222,7 @@ async function updatePendingBoard() {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const daysOld = getDaysOld(client);
+    console.log(`[pendingBoard] ${name} daysOld=${daysOld} raw=${JSON.stringify(client.properties['Days Old'])}`);
 
     const eligibleTasks = openTasks
       .filter(t => getClientId(t) === clientId)
