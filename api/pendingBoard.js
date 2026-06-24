@@ -22,6 +22,15 @@ const STAGE_MESSAGES = [
   { stage: 'Client Assets', message: 'Request Client Assets' },
 ];
 
+// Due date = client start date + offset days
+const STAGE_DUE_OFFSET = {
+  'Onboarding':    1,
+  'Day 1':         2,
+  'Day 2':         2,
+  'Day 3':         3,
+  'Client Assets': 3,
+};
+
 const TASK_DEPENDENCIES = {
   7:  [6],
   10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 17: [6],
@@ -40,6 +49,12 @@ function getTaskNumber(page) {
   return match ? parseInt(match[1]) : null;
 }
 
+function getTaskShortName(page) {
+  const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
+  const match = title.match(/^\d+\s*-\s*(.+)$/);
+  return match ? match[1].trim() : title;
+}
+
 function getClientId(page) {
   return page.properties['Client']?.relation?.[0]?.id ?? null;
 }
@@ -50,6 +65,16 @@ function getPrimaryRole(page) {
 
 function getOnboardingStage(page) {
   return page.properties['Onboarding Stage']?.select?.name ?? null;
+}
+
+function getStartDate(client) {
+  const prop = client.properties['Start Date'];
+  if (!prop) return null;
+  const dateStr = prop.date?.start ?? null;
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 function getDaysOld(client) {
@@ -64,6 +89,32 @@ function getDaysOld(client) {
   }
   if (prop.type === 'rollup') return prop.rollup?.number ?? null;
   return null;
+}
+
+function getTaskDueDate(task, startDate) {
+  if (!startDate) return null;
+  const stage = getOnboardingStage(task);
+  const offset = STAGE_DUE_OFFSET[stage];
+  if (offset === undefined) return null;
+  const due = new Date(startDate);
+  due.setDate(startDate.getDate() + offset);
+  return due;
+}
+
+function diffDays(a, b) {
+  return Math.floor((a - b) / (1000 * 60 * 60 * 24));
+}
+
+function calcEfficiencyScore(tasks, startDate, today) {
+  if (tasks.length === 0) return 100;
+  let total = 0;
+  for (const task of tasks) {
+    const due = getTaskDueDate(task, startDate);
+    if (!due) { total += 1.0; continue; }
+    const overdueDays = diffDays(today, due);
+    total += overdueDays <= 0 ? 1.0 : Math.max(0, 1 - overdueDays / 10);
+  }
+  return Math.min(100, Math.round((total / tasks.length) * 100));
 }
 
 function buildDoneMap(allTasks) {
@@ -137,19 +188,25 @@ function deriveCommsRequired(eligibleTasks) {
   return null;
 }
 
-function buildCard({ name, daysOld, nextByRole, comms }) {
+function buildCard({ name, daysOld, comms, overdue, dueToday, upcoming, score }) {
   const lines = [];
 
-  if (daysOld !== null) lines.push(`📅 Day ${daysOld}`);
+  lines.push(`📅 Day ${daysOld ?? '?'}   📊 Score: ${score}%`);
   if (comms) lines.push(`💬 ${comms}`);
+  lines.push('');
 
-  for (const role of ROLES) {
-    if (nextByRole[role]) {
-      lines.push(`${ROLE_EMOJI[role]} ${nextByRole[role]}`);
-    }
+  if (overdue.length > 0) {
+    lines.push(`⚠️ Overdue (${overdue.length}): ${overdue.map(getTaskShortName).join(', ')}`);
   }
-
-  const bodyText = lines.length > 0 ? lines.join('\n') : '✓ Clear';
+  if (dueToday.length > 0) {
+    lines.push(`✅ Due Today (${dueToday.length}): ${dueToday.map(getTaskShortName).join(', ')}`);
+  }
+  if (upcoming.length > 0) {
+    lines.push(`📌 Upcoming: ${getTaskShortName(upcoming[0])}`);
+  }
+  if (overdue.length === 0 && dueToday.length === 0 && upcoming.length === 0) {
+    lines.push('✓ Clear');
+  }
 
   return {
     type: 'callout',
@@ -159,7 +216,7 @@ function buildCard({ name, daysOld, nextByRole, comms }) {
       color: 'default',
       children: [{
         type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: bodyText } }] },
+        paragraph: { rich_text: [{ text: { content: lines.join('\n') } }] },
       }],
     },
   };
@@ -207,6 +264,9 @@ async function safeDeleteBlock(blockId) {
 async function updatePendingBoard() {
   console.log('[pendingBoard] Building pending client board...');
 
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
   const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
@@ -222,6 +282,7 @@ async function updatePendingBoard() {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const daysOld = getDaysOld(client);
+    const startDate = getStartDate(client);
 
     const eligibleTasks = openTasks
       .filter(t => getClientId(t) === clientId)
@@ -229,14 +290,23 @@ async function updatePendingBoard() {
 
     eligibleTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
 
-    const nextByRole = {};
-    for (const role of ROLES) {
-      const task = eligibleTasks.find(t => getPrimaryRole(t) === role);
-      if (task) nextByRole[role] = task.properties['Name']?.title?.[0]?.plain_text ?? '';
+    const overdue = [];
+    const dueToday = [];
+    const upcoming = [];
+
+    for (const task of eligibleTasks) {
+      const due = getTaskDueDate(task, startDate);
+      if (!due) { upcoming.push(task); continue; }
+      const d = diffDays(today, due);
+      if (d > 0) overdue.push(task);
+      else if (d === 0) dueToday.push(task);
+      else upcoming.push(task);
     }
 
+    const score = calcEfficiencyScore(eligibleTasks, startDate, today);
     const comms = deriveCommsRequired(eligibleTasks);
-    return { name, daysOld, nextByRole, comms };
+
+    return { name, daysOld, comms, overdue, dueToday, upcoming, score };
   });
 
   const existing = await notion.blocks.children.list({ block_id: BOARD_BLOCK_ID });
@@ -252,7 +322,6 @@ async function updatePendingBoard() {
     return { clientsShown: 0 };
   }
 
-  // Pair cards into rows of 2 using column_list
   const rows = [];
   for (let i = 0; i < cards.length; i += 2) {
     const pair = cards.slice(i, i + 2);
