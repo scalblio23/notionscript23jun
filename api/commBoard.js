@@ -117,41 +117,52 @@ function isEditedToday(page, today) {
   return d.getTime() === today.getTime() || d.getTime() === today.getTime() - 86400000;
 }
 
-async function generateNarrative(clientName, daysOld, doing, done) {
-  const doingList = doing.length > 0 ? doing.join(', ') : 'none';
-  const doneList = done.length > 0 ? done.join(', ') : 'none';
+async function generateClientMessage(clientName, daysOld, pendingTasks, completedToday) {
+  const pending = pendingTasks.length > 0 ? pendingTasks.join(', ') : null;
+  const done = completedToday.length > 0 ? completedToday.join(', ') : null;
 
-  const prompt = `You are writing a brief internal status update for a client onboarding agency's communication board. Keep it to 2-3 sentences. Be direct and operational — no fluff. Write in present tense as if briefing a team member.
+  const context = [
+    pending ? `Tasks we need from the client or that are pending for them today: ${pending}` : null,
+    done ? `What we completed for them today: ${done}` : null,
+  ].filter(Boolean).join('\n');
 
-Client: ${clientName}
-Day: ${daysOld ?? 'unknown'} of onboarding
-Tasks active/due today: ${doingList}
-Completed today: ${doneList}
+  const prompt = `You are a comms assistant at a digital marketing agency. Write a short WhatsApp message to send to a client named ${clientName} (day ${daysOld ?? '?'} of their onboarding).
 
-Write a short narrative summary of where things stand for this client today.`;
+Context:
+${context}
+
+The message should:
+- Be professional but warm and slightly humorous
+- Be brief (2-4 sentences max)
+- Naturally mention what needs to happen or what progress has been made
+- Sound like a real person, not a robot
+- Do NOT use emojis excessively — one or two max
+- Do NOT start with "Hi ${clientName}" or any greeting — jump straight into it
+
+Write only the message text, nothing else.`;
 
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      max_tokens: 200,
       messages: [{ role: 'user', content: prompt }],
     });
-    return msg.content[0]?.text?.trim() ?? `${doing.length} task(s) active, ${done.length} completed today.`;
+    return msg.content[0]?.text?.trim() ?? `Pending: ${pending ?? 'nothing'}.`;
   } catch (err) {
     console.error(`[commBoard] LLM error for ${clientName}:`, err.message);
-    return `Active: ${doingList}. Completed today: ${doneList}.`;
+    return pending ? `We need to sort out: ${pending}.` : 'All good on our end today.';
   }
 }
 
-function buildClientBlock(name, narrative) {
+function buildClientBlock(name, message) {
   return {
     type: 'callout',
     callout: {
       rich_text: [
         { text: { content: name }, annotations: { bold: true } },
-        { text: { content: '\n' + narrative } },
+        { text: { content: '\n' + message } },
       ],
-      icon: { emoji: '👤' },
+      icon: { emoji: '💬' },
       color: 'default',
     },
   };
@@ -239,7 +250,7 @@ async function updateCommBoard() {
     const startDate = getStartDate(client);
     const daysOld = getDaysOld(client);
 
-    const doing = openTasks
+    const pending = openTasks
       .filter(t => getClientId(t) === clientId)
       .filter(t => isEligible(t, doneMap))
       .filter(t => {
@@ -254,16 +265,15 @@ async function updateCommBoard() {
       .filter(t => isEditedToday(t, today))
       .map(getTaskShortName);
 
-    return { name, daysOld, doing, done };
+    return { name, daysOld, pending, done };
   }
 
   async function buildClientCards(clientList) {
-    const active = clientList.map(getClientData).filter(d => d.doing.length > 0 || d.done.length > 0);
-    // Generate all narratives in parallel
-    const narratives = await Promise.all(
-      active.map(d => generateNarrative(d.name, d.daysOld, d.doing, d.done))
+    const active = clientList.map(getClientData).filter(d => d.pending.length > 0 || d.done.length > 0);
+    const messages = await Promise.all(
+      active.map(d => generateClientMessage(d.name, d.daysOld, d.pending, d.done))
     );
-    return active.map((d, i) => buildClientBlock(d.name, narratives[i]));
+    return active.map((d, i) => buildClientBlock(d.name, messages[i]));
   }
 
   const [onboardingCards, activeCards] = await Promise.all([
