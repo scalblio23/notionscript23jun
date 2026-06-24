@@ -19,35 +19,22 @@ const DIVIDERS = [
 
 const DIVIDER_MARKER = '━━━';
 
-// Dependencies by CCF task number: task only shows if all listed dep numbers are Done
-// Keys are task numbers, values are arrays of required task numbers that must be Done
 const TASK_DEPENDENCIES = {
-  7:  [6],                                      // Funnel Template → Strategy
-  10: [6],                                      // Domain → Strategy
-  11: [6],                                      // Github Repo → Strategy
-  12: [6],                                      // Server → Strategy
-  13: [6],                                      // Ad Images → Strategy
-  14: [6],                                      // Ad Videos → Strategy
-  15: [6],                                      // Ad Copy → Strategy
-  16: [6],                                      // Ad Targeting / Setup → Strategy
-  17: [6],                                      // Booking System (Day 2) → Strategy
-  20: [13, 14, 15],                             // Ad Creatives Approved → Images, Videos, Copy
-  21: [13, 14, 15],                             // Ad Setup + Structure → Images, Videos, Copy
-  25: [1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20,21,22,24], // Final Details → everything
-  26: [25],                                     // Confirmation Message → Final Details
-  28: [21, 16, 15, 17, 12, 10],                 // Automations → Setup, Targeting, Copy, Booking, Server, Domain
-  29: [21, 16, 15, 17, 12, 10],                 // Ad Launch → same as Automations
-  23: [26, 15, 16, 13, 14],                     // Launch → Confirmation, Copy, Targeting, Images, Videos
-  30: [6],                                      // Conversion Mechanism → Strategy
-  31: [6],                                      // Lead Source → Strategy
-  32: [6],                                      // Details → Strategy
-  33: [6],                                      // Lead Sheet → Strategy
-  34: [6],                                      // Claude Chat → Strategy
+  7:  [6],
+  10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 17: [6],
+  20: [13, 14, 15],
+  21: [13, 14, 15],
+  25: [1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20,21,22,24],
+  26: [25],
+  28: [21, 16, 15, 17, 12, 10],
+  29: [21, 16, 15, 17, 12, 10],
+  23: [26, 15, 16, 13, 14],
+  30: [6], 31: [6], 32: [6], 33: [6], 34: [6],
 };
 
 function isDivider(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
-  return title.includes(DIVIDER_MARKER) && !title.includes('🧑');
+  return title.includes(DIVIDER_MARKER);
 }
 
 function getTaskNumber(page) {
@@ -61,7 +48,6 @@ function getClientId(page) {
 }
 
 function buildDoneMap(allTasks) {
-  // Returns Map<clientId, Set<taskNumber>> for Done tasks
   const doneMap = new Map();
   for (const page of allTasks) {
     const status = page.properties['Status']?.select?.name ?? '';
@@ -92,6 +78,7 @@ function calcPriorityScore(page) {
   const clientPriority = props['Client Priority']?.select?.name ?? '';
   const onboardingStage = props['Onboarding Stage']?.select?.name ?? '';
   const taskName = (props['Name']?.title?.[0]?.plain_text ?? '').toLowerCase();
+  const efficiency = props['Efficiency']?.select?.name ?? '';
 
   // Rule 1: absolute override
   if (taskPriority === '💀 Do this before anything else') return -1;
@@ -102,14 +89,20 @@ function calcPriorityScore(page) {
     clientPriority === 'Med' ? 1 :
     clientPriority === 'Low' ? 2 : 3;
 
-  // Rule 3: Onboarding-related stages rank above plain tasks
+  // Rule 3: Efficiency (Very Overdue first)
+  const efficiencyRank =
+    efficiency === 'Very Overdue' ? 0 :
+    efficiency === 'Overdue' ? 1 :
+    efficiency === 'On Time' ? 2 : 3;
+
+  // Rule 4: Onboarding-related stages rank above plain tasks
   const onboardingStages = new Set(['Onboarding', 'Day 1', 'Day 2', 'Day 3', 'Client Assets']);
   const taskTypeRank = onboardingStages.has(onboardingStage) ? 0 : 1;
 
-  // Rule 4: Message tasks rank higher within their group
+  // Rule 5: Message tasks rank higher within their group
   const messageRank = taskName.includes('message') ? 0 : 1;
 
-  // Rule 5: Onboarding Stage sequence
+  // Rule 6: Onboarding Stage sequence
   const stageRank =
     onboardingStage === 'Onboarding' ? 0 :
     onboardingStage === 'Day 1' ? 1 :
@@ -117,18 +110,19 @@ function calcPriorityScore(page) {
     onboardingStage === 'Day 3' ? 3 :
     onboardingStage === 'Client Assets' ? 4 : 5;
 
-  // Rule 6: Task Priority
+  // Rule 7: Task Priority
   const taskPriorityRank =
     taskPriority === '🚨 Urgent' ? 1 :
     taskPriority === '⏰ Important' ? 2 :
     taskPriority === '🟠 Pending' ? 3 :
     taskPriority === '😌 Get to it when you can' ? 4 : 5;
 
-  return clientPriorityRank * 10000000
-    + taskTypeRank * 1000000
-    + messageRank * 100000
-    + stageRank * 10000
-    + taskPriorityRank * 1000;
+  return clientPriorityRank * 100000000
+    + efficiencyRank       * 10000000
+    + taskTypeRank         * 1000000
+    + messageRank          * 100000
+    + stageRank            * 10000
+    + taskPriorityRank     * 1000;
 }
 
 function getPrimaryRole(page) {
@@ -155,10 +149,9 @@ function selectTop7WithMinTasks(sectionTasks, min = 2) {
   const extraTasks = rest.filter(isTaskType).slice(0, needed);
   if (extraTasks.length === 0) return top7;
 
-  // Remove the lowest-priority non-Task tasks from top7 to make room
   const nonTaskInTop7 = top7
     .filter(t => !isTaskType(t))
-    .sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a)); // worst first
+    .sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
 
   const toRemove = new Set(nonTaskInTop7.slice(0, extraTasks.length).map(t => t.id));
   const result = [...top7.filter(t => !toRemove.has(t.id)), ...extraTasks];
@@ -169,25 +162,21 @@ function selectTop7WithMinTasks(sectionTasks, min = 2) {
 async function getAllPages() {
   const pages = [];
   let cursor;
-
   do {
     const response = await notion.databases.query({
       database_id: DATABASE_ID,
       start_cursor: cursor,
       page_size: 100,
     });
-
     pages.push(...response.results);
     cursor = response.has_more ? response.next_cursor : undefined;
   } while (cursor);
-
   return pages;
 }
 
 async function ensureDividers(existingDividers) {
   const validNames = new Set(DIVIDERS.map(d => d.name));
 
-  // Archive stale dividers that no longer match current names
   for (const page of existingDividers) {
     const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
     if (!validNames.has(title)) {
@@ -200,7 +189,6 @@ async function ensureDividers(existingDividers) {
     const exists = existingDividers.some(
       p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
     );
-
     if (!exists) {
       await notion.pages.create({
         parent: { database_id: DATABASE_ID },
@@ -217,7 +205,6 @@ async function ensureDividers(existingDividers) {
 async function syncFocusSlots() {
   console.log('[sync] Starting Focus Slot sync...');
 
-  // Fetch all pages (open + done) so we can check dependency status
   const allPages = await getAllPages();
   console.log(`[sync] Found ${allPages.length} total page(s)`);
 
@@ -244,31 +231,24 @@ async function syncFocusSlots() {
     top7.forEach((task, i) => {
       const desired = section.start + i;
       const current = getCurrentFocusSlot(task);
-      if (current !== desired) {
-        updates.push({ id: task.id, slot: desired });
-      }
+      if (current !== desired) updates.push({ id: task.id, slot: desired });
       assignedIds.add(task.id);
     });
 
-    // Clear slots for section tasks not in top7 (includes ineligible tasks)
     openTasks
       .filter(t => getPrimaryRole(t) === section.role && !top7.includes(t))
       .forEach(task => {
-        if (getCurrentFocusSlot(task) !== null) {
-          updates.push({ id: task.id, slot: null });
-        }
+        if (getCurrentFocusSlot(task) !== null) updates.push({ id: task.id, slot: null });
         assignedIds.add(task.id);
       });
   }
 
-  // Clear slots for tasks with no matching role section
   for (const task of openTasks) {
     if (!assignedIds.has(task.id) && getCurrentFocusSlot(task) !== null) {
       updates.push({ id: task.id, slot: null });
     }
   }
 
-  // Ensure divider slots are correct
   for (const div of DIVIDERS) {
     const page = dividerPages.find(
       p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
