@@ -112,19 +112,25 @@ For example:
 - "Strategy Call" → we are preparing their strategy
 - "Send Day 1 Message" → we are checking in on their progress
 
+Common openers to mix and match (pick one that fits naturally):
+- "Just to give you an idea on what we are working on today..."
+- "Here's a quick update"
+- "Hey [name], today we're going over [topic]"
+- "Hey [name]" (simple, direct)
+
+Common closers to mix and match (pick one that fits naturally):
+- "Will keep you posted"
+- "Let me know if you have any questions"
+- "Will keep you updated"
+
 Style rules:
 - Max 15 words total
 - Casual, direct, friendly — like texting a mate
-- Use "Hey [name]" to open
 - Use "will" or "working on" statements — never past tense claiming completion
 - No corporate speak, no fluff
 - No more than one emoji, often none
 - Australian informal tone
-
-Examples of good messages:
-"Hey Christian, working on your campaign today. Will keep you posted"
-"Good morning, continuing to build out your ads today, hoping to go live soon"
-"Hey mate, sorting out your setup now. Will send through an update shortly"
+- Pick ONE opener and ONE closer that feel natural together — don't use both if it pushes past 15 words
 
 Client: ${clientName} (day ${daysOld ?? '?'} of onboarding)
 Internal tasks in progress for them: ${taskList}
