@@ -24,11 +24,11 @@ function deriveStage(pendingNumbers, ccfRun) {
   if (pendingNumbers.size === 0) return 5;
   const done = (num) => !pendingNumbers.has(num);
   const pending = (num) => pendingNumbers.has(num);
-  if (done(23)) return 5; // Launch done → Live
-  if (done(25)) return 4; // Final Details done → Ready For Launch
-  if (done(20)) return 3; // Ad Creatives Approved done → Launch Preparation
-  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2; // Creative Production
-  if (done(6)) return 1;  // Strategy done → Build
+  if (done(23)) return 5;
+  if (done(25)) return 4;
+  if (done(20)) return 3;
+  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2;
+  if (done(6)) return 1;
   return 0;
 }
 
@@ -75,6 +75,17 @@ async function safeDeleteBlock(blockId) {
   }
 }
 
+async function deleteAllChildren(blockId) {
+  let cursor;
+  do {
+    const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
+    for (const block of res.results) {
+      await safeDeleteBlock(block.id);
+    }
+    cursor = res.has_more ? res.next_cursor : undefined;
+  } while (cursor);
+}
+
 async function updateProgressTracker() {
   console.log('[tracker] Building client progress tracker...');
 
@@ -114,17 +125,12 @@ async function updateProgressTracker() {
 
   rows.sort((a, b) => b.stageIndex - a.stageIndex);
 
-  const existing = await notion.blocks.children.list({ block_id: TRACKER_BLOCK_ID });
-  for (const block of existing.results) {
-    await safeDeleteBlock(block.id);
-  }
+  await deleteAllChildren(TRACKER_BLOCK_ID);
 
   if (rows.length === 0) {
     await notion.blocks.children.append({
       block_id: TRACKER_BLOCK_ID,
-      children: [{
-        paragraph: { rich_text: [{ text: { content: 'No clients found.' } }] },
-      }],
+      children: [{ type: 'paragraph', paragraph: { rich_text: [{ text: { content: 'No clients found.' } }] } }],
     });
     return { clientsTracked: 0 };
   }
@@ -135,6 +141,7 @@ async function updateProgressTracker() {
     const next = nextTask ? `  →  ${nextTask}` : '';
     const line = `${name.padEnd(22)}${bar}  ${stageName}${next}`;
     return {
+      type: 'paragraph',
       paragraph: { rich_text: [{ text: { content: line } }] },
     };
   });
