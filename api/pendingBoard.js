@@ -14,7 +14,6 @@ const ROLE_EMOJI = {
   'Creative':      '🦕',
 };
 
-// Ordered onboarding stages — earliest stage with pending tasks = message to send
 const STAGE_MESSAGES = [
   { stage: 'Onboarding',    message: 'Send Onboarding Message' },
   { stage: 'Day 1',         message: 'Send Day 1 Message' },
@@ -51,6 +50,14 @@ function getPrimaryRole(page) {
 
 function getOnboardingStage(page) {
   return page.properties['Onboarding Stage']?.select?.name ?? null;
+}
+
+function getDaysOld(client) {
+  const prop = client.properties['Days Old'];
+  if (!prop) return null;
+  if (prop.type === 'number') return prop.number;
+  if (prop.type === 'formula') return prop.formula?.number ?? null;
+  return null;
 }
 
 function buildDoneMap(allTasks) {
@@ -124,6 +131,34 @@ function deriveCommsRequired(eligibleTasks) {
   return null;
 }
 
+function buildCard({ name, daysOld, nextByRole, comms }) {
+  const lines = [];
+
+  if (daysOld !== null) lines.push(`📅 Day ${daysOld}`);
+  if (comms) lines.push(`💬 ${comms}`);
+
+  for (const role of ROLES) {
+    if (nextByRole[role]) {
+      lines.push(`${ROLE_EMOJI[role]} ${nextByRole[role]}`);
+    }
+  }
+
+  const bodyText = lines.length > 0 ? lines.join('\n') : '✓ Clear';
+
+  return {
+    type: 'callout',
+    callout: {
+      rich_text: [{ text: { content: name } }],
+      icon: { emoji: '⚫' },
+      color: 'default',
+      children: [{
+        type: 'paragraph',
+        paragraph: { rich_text: [{ text: { content: bodyText } }] },
+      }],
+    },
+  };
+}
+
 async function getAllTasks() {
   const pages = [];
   let cursor;
@@ -171,6 +206,7 @@ async function updatePendingBoard() {
   const cards = pendingClients.map(client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
+    const daysOld = getDaysOld(client);
 
     const eligibleTasks = openTasks
       .filter(t => getClientId(t) === clientId)
@@ -181,14 +217,11 @@ async function updatePendingBoard() {
     const nextByRole = {};
     for (const role of ROLES) {
       const task = eligibleTasks.find(t => getPrimaryRole(t) === role);
-      if (task) {
-        nextByRole[role] = task.properties['Name']?.title?.[0]?.plain_text ?? '';
-      }
+      if (task) nextByRole[role] = task.properties['Name']?.title?.[0]?.plain_text ?? '';
     }
 
     const comms = deriveCommsRequired(eligibleTasks);
-
-    return { name, nextByRole, comms };
+    return { name, daysOld, nextByRole, comms };
   });
 
   const existing = await notion.blocks.children.list({ block_id: BOARD_BLOCK_ID });
@@ -200,44 +233,27 @@ async function updatePendingBoard() {
   if (cards.length === 0) {
     await notion.blocks.children.append({
       block_id: BOARD_BLOCK_ID,
-      children: [{
-        type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: 'No pending clients.' } }] },
-      }],
+      children: [{ type: 'paragraph', paragraph: { rich_text: [{ text: { content: 'No pending clients.' } }] } }],
     });
     return { clientsShown: 0 };
   }
 
-  const children = cards.map(({ name, nextByRole, comms }) => {
-    const lines = [];
-
-    if (comms) {
-      lines.push(`💬  Comms Required     →  ${comms}`);
-    }
-
-    for (const role of ROLES) {
-      if (nextByRole[role]) {
-        lines.push(`${ROLE_EMOJI[role]}  ${role.padEnd(16)}→  ${nextByRole[role]}`);
-      }
-    }
-
-    const bodyText = lines.length > 0 ? lines.join('\n') : '✓ No pending tasks';
-
-    return {
-      type: 'callout',
-      callout: {
-        rich_text: [{ text: { content: name } }],
-        icon: { emoji: '🔵' },
-        color: 'blue_background',
-        children: [{
-          type: 'paragraph',
-          paragraph: { rich_text: [{ text: { content: bodyText } }] },
-        }],
+  // Pair cards into rows of 2 using column_list
+  const rows = [];
+  for (let i = 0; i < cards.length; i += 2) {
+    const pair = cards.slice(i, i + 2);
+    rows.push({
+      type: 'column_list',
+      column_list: {
+        children: pair.map(card => ({
+          type: 'column',
+          column: { children: [buildCard(card)] },
+        })),
       },
-    };
-  });
+    });
+  }
 
-  await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children });
+  await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: rows });
 
   console.log(`[pendingBoard] Board updated with ${cards.length} client(s)`);
   return { clientsShown: cards.length };
