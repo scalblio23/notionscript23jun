@@ -6,21 +6,25 @@ const { syncClientBreakdown } = require('./clientBreakdown');
 const { updatePendingBoard } = require('./pendingBoard');
 const { updateCommBoard } = require('./commBoard');
 
-module.exports = async function handler(req, res) {
+async function safeRun(name, fn) {
   try {
-    const [focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult, commResult] = await Promise.all([
-      syncFocusSlots(),
-      syncCCF(),
-      updateQuote(),
-      updateProgressTracker(),
-      syncClientBreakdown(),
-      updatePendingBoard(),
-      updateCommBoard(),
-    ]);
-
-    return res.status(200).json({ ok: true, focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult, commResult });
+    return await fn();
   } catch (err) {
-    console.error('[cron] Error:', err);
-    return res.status(500).json({ ok: false, error: err.message });
+    console.error(`[cron] ${name} failed:`, err.message);
+    return { error: err.message };
   }
+}
+
+module.exports = async function handler(req, res) {
+  const [focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult, commResult] = await Promise.all([
+    safeRun('sync', syncFocusSlots),
+    safeRun('ccf', syncCCF),
+    safeRun('quote', updateQuote),
+    safeRun('tracker', updateProgressTracker),
+    safeRun('clientBreakdown', syncClientBreakdown),
+    safeRun('pendingBoard', updatePendingBoard),
+    safeRun('commBoard', updateCommBoard),
+  ]);
+
+  return res.status(200).json({ ok: true, focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult, commResult });
 };

@@ -324,10 +324,21 @@ async function updatePendingBoard() {
     return { clientsShown: 0 };
   }
 
-  await notion.blocks.children.append({
-    block_id: BOARD_BLOCK_ID,
-    children: cards.map(buildCard),
-  });
+  const rows = [];
+  for (let i = 0; i < cards.length; i += 2) {
+    const pair = cards.slice(i, i + 2);
+    rows.push({
+      type: 'column_list',
+      column_list: {
+        children: pair.map(card => ({
+          type: 'column',
+          column: { children: [buildCard(card)] },
+        })),
+      },
+    });
+  }
+
+  await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: rows });
 
   console.log(`[pendingBoard] Board updated with ${cards.length} client(s)`);
   return { clientsShown: cards.length };
