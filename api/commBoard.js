@@ -112,27 +112,29 @@ function diffDays(a, b) {
 async function generateMessage(clientName, daysOld, tasks) {
   const taskList = tasks.join(', ');
 
-  const prompt = `You write short WhatsApp messages on behalf of an Australian digital marketing agency owner.
+  const prompt = `You write short WhatsApp messages on behalf of an Australian digital marketing agency, sent TO clients as progress updates.
+
+The agency is telling the client what WE are working on or have done for them today. These are outbound updates — not requests.
 
 Style rules:
 - Max 15 words total
 - Casual, direct, friendly — like texting a mate
 - Use "Hey [name]" to open
-- Short punchy sentences, sometimes incomplete
-- Occasionally use "will" statements: "Will keep you updated"
+- Short punchy sentences
+- Use "will" statements: "Will keep you updated", "Will send through shortly"
 - No corporate speak, no fluff
 - No more than one emoji, often none
 - Australian informal tone
 
-Examples of the style:
+Examples:
+"Hey Christian thanks for the form! Will start putting the campaign together now"
+"Good morning, continuing to work on your campaign today, hoping to go live tomorrow"
 "Hey mate will post the stats shortly"
-"Hey Christian thanks for completing the form! Will start the campaign process now"
-"Working on your campaign today, hoping to go live tomorrow"
 
 Client: ${clientName} (day ${daysOld ?? '?'} of onboarding)
-What needs to happen: ${taskList}
+What we are working on for them today: ${taskList}
 
-Write the message. 15 words max. Nothing else.`;
+Write the update message. 15 words max. Nothing else.`;
 
   try {
     const msg = await anthropic.messages.create({
@@ -143,7 +145,7 @@ Write the message. 15 words max. Nothing else.`;
     return msg.content[0]?.text?.trim() ?? taskList;
   } catch (err) {
     console.error(`[commBoard] LLM error for ${clientName}:`, err.message);
-    return `Hey ${clientName}, just need: ${tasks[0]}.`;
+    return `Hey ${clientName}, working on your setup today. Will keep you updated.`;
   }
 }
 
