@@ -47,7 +47,7 @@ async function updateQuote() {
 
   await notion.blocks.update({
     block_id: QUOTE_BLOCK_ID,
-    paragraph: {
+    heading_3: {
       rich_text: [{ text: { content: text } }],
     },
   });
