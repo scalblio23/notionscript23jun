@@ -19,16 +19,77 @@ const DIVIDERS = [
 
 const DIVIDER_MARKER = '━━━';
 
+// Dependencies by CCF task number: task only shows if all listed dep numbers are Done
+// Keys are task numbers, values are arrays of required task numbers that must be Done
+const TASK_DEPENDENCIES = {
+  7:  [6],                                      // Funnel Template → Strategy
+  10: [6],                                      // Domain → Strategy
+  11: [6],                                      // Github Repo → Strategy
+  12: [6],                                      // Server → Strategy
+  13: [6],                                      // Ad Images → Strategy
+  14: [6],                                      // Ad Videos → Strategy
+  15: [6],                                      // Ad Copy → Strategy
+  16: [6],                                      // Ad Targeting / Setup → Strategy
+  17: [6],                                      // Booking System (Day 2) → Strategy
+  20: [13, 14, 15],                             // Ad Creatives Approved → Images, Videos, Copy
+  21: [13, 14, 15],                             // Ad Setup + Structure → Images, Videos, Copy
+  25: [1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20,21,22,24], // Final Details → everything
+  26: [25],                                     // Confirmation Message → Final Details
+  28: [21, 16, 15, 17, 12, 10],                 // Automations → Setup, Targeting, Copy, Booking, Server, Domain
+  29: [21, 16, 15, 17, 12, 10],                 // Ad Launch → same as Automations
+  23: [26, 15, 16, 13, 14],                     // Launch → Confirmation, Copy, Targeting, Images, Videos
+  30: [6],                                      // Conversion Mechanism → Strategy
+  31: [6],                                      // Lead Source → Strategy
+  32: [6],                                      // Details → Strategy
+  33: [6],                                      // Lead Sheet → Strategy
+  34: [6],                                      // Claude Chat → Strategy
+};
+
 function isDivider(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
   return title.includes(DIVIDER_MARKER);
+}
+
+function getTaskNumber(page) {
+  const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
+  const match = title.match(/^(\d+)\s*-/);
+  return match ? parseInt(match[1]) : null;
+}
+
+function getClientId(page) {
+  return page.properties['Client']?.relation?.[0]?.id ?? null;
+}
+
+function buildDoneMap(allTasks) {
+  // Returns Map<clientId, Set<taskNumber>> for Done tasks
+  const doneMap = new Map();
+  for (const page of allTasks) {
+    const status = page.properties['Status']?.select?.name ?? '';
+    if (status !== 'Done') continue;
+    const clientId = getClientId(page);
+    const num = getTaskNumber(page);
+    if (!clientId || num === null) continue;
+    if (!doneMap.has(clientId)) doneMap.set(clientId, new Set());
+    doneMap.get(clientId).add(num);
+  }
+  return doneMap;
+}
+
+function isEligible(page, doneMap) {
+  const num = getTaskNumber(page);
+  if (num === null) return true;
+  const deps = TASK_DEPENDENCIES[num];
+  if (!deps || deps.length === 0) return true;
+  const clientId = getClientId(page);
+  if (!clientId) return true;
+  const doneTasks = doneMap.get(clientId) ?? new Set();
+  return deps.every(d => doneTasks.has(d));
 }
 
 function calcPriorityScore(page) {
   const props = page.properties;
   const taskPriority = props['Task Priority']?.select?.name ?? '';
   const clientPriority = props['Client Priority']?.select?.name ?? '';
-  const taskType = props['Type']?.select?.name ?? '';
   const onboardingStage = props['Onboarding Stage']?.select?.name ?? '';
   const taskName = (props['Name']?.title?.[0]?.plain_text ?? '').toLowerCase();
 
@@ -41,7 +102,7 @@ function calcPriorityScore(page) {
     clientPriority === 'Med' ? 1 :
     clientPriority === 'Low' ? 2 : 3;
 
-  // Rule 3: Task Type (Onboarding-related stages before regular tasks)
+  // Rule 3: Onboarding-related stages rank above plain tasks
   const onboardingStages = new Set(['Onboarding', 'Day 1', 'Day 2', 'Day 3', 'Client Assets']);
   const taskTypeRank = onboardingStages.has(onboardingStage) ? 0 : 1;
 
@@ -105,17 +166,13 @@ function selectTop7WithMinTasks(sectionTasks, min = 2) {
   return result;
 }
 
-async function getAllOpenPages() {
+async function getAllPages() {
   const pages = [];
   let cursor;
 
   do {
     const response = await notion.databases.query({
       database_id: DATABASE_ID,
-      filter: {
-        property: 'Status',
-        select: { does_not_equal: 'Done' },
-      },
       start_cursor: cursor,
       page_size: 100,
     });
@@ -160,21 +217,28 @@ async function ensureDividers(existingDividers) {
 async function syncFocusSlots() {
   console.log('[sync] Starting Focus Slot sync...');
 
-  const allPages = await getAllOpenPages();
-  console.log(`[sync] Found ${allPages.length} open page(s)`);
+  // Fetch all pages (open + done) so we can check dependency status
+  const allPages = await getAllPages();
+  console.log(`[sync] Found ${allPages.length} total page(s)`);
 
   const dividerPages = allPages.filter(isDivider);
-  const tasks = allPages.filter(p => !isDivider(p));
+  const allTasks = allPages.filter(p => !isDivider(p));
+  const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
+
+  const doneMap = buildDoneMap(allTasks);
 
   await ensureDividers(dividerPages);
 
-  tasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
+  openTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
 
   const updates = [];
   const assignedIds = new Set();
 
   for (const section of ROLE_SECTIONS) {
-    const sectionTasks = tasks.filter(t => getPrimaryRole(t) === section.role);
+    const sectionTasks = openTasks
+      .filter(t => getPrimaryRole(t) === section.role)
+      .filter(t => isEligible(t, doneMap));
+
     const top7 = selectTop7WithMinTasks(sectionTasks);
 
     top7.forEach((task, i) => {
@@ -186,17 +250,19 @@ async function syncFocusSlots() {
       assignedIds.add(task.id);
     });
 
-    // Clear slots for section tasks not in top7
-    sectionTasks.filter(t => !top7.includes(t)).forEach(task => {
-      if (getCurrentFocusSlot(task) !== null) {
-        updates.push({ id: task.id, slot: null });
-      }
-      assignedIds.add(task.id);
-    });
+    // Clear slots for section tasks not in top7 (includes ineligible tasks)
+    openTasks
+      .filter(t => getPrimaryRole(t) === section.role && !top7.includes(t))
+      .forEach(task => {
+        if (getCurrentFocusSlot(task) !== null) {
+          updates.push({ id: task.id, slot: null });
+        }
+        assignedIds.add(task.id);
+      });
   }
 
   // Clear slots for tasks with no matching role section
-  for (const task of tasks) {
+  for (const task of openTasks) {
     if (!assignedIds.has(task.id) && getCurrentFocusSlot(task) !== null) {
       updates.push({ id: task.id, slot: null });
     }
@@ -223,7 +289,7 @@ async function syncFocusSlots() {
   }
 
   console.log('[sync] Sync complete.');
-  return { tasksFound: tasks.length, pagesUpdated: updates.length };
+  return { tasksFound: openTasks.length, pagesUpdated: updates.length };
 }
 
 module.exports = { syncFocusSlots };
