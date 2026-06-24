@@ -7,7 +7,6 @@ const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const DIVIDER_MARKER = '━━━';
 const CLIENT_DIVIDER_MARKER = '───';
 
-// Reuse dependency and priority logic from sync.js
 const TASK_DEPENDENCIES = {
   7:  [6],
   10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 17: [6],
@@ -100,7 +99,6 @@ function calcPriorityScore(page) {
     + taskPriorityRank * 1000;
 }
 
-// Derive onboarding stage index for client ordering (mirrors tracker.js logic)
 function deriveStageIndex(pendingNumbers, ccfRun) {
   if (!ccfRun) return 0;
   if (pendingNumbers.size === 0) return 5;
@@ -167,6 +165,7 @@ async function syncClientBreakdown() {
   await ensureClientSlotProperty();
 
   const [allPages, clients] = await Promise.all([getAllPages(), getAllClients()]);
+  console.log(`[clientBreakdown] allPages=${allPages.length} clients=${clients.length}`);
 
   const allTasks = allPages.filter(p => !isDivider(p));
   const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
@@ -174,10 +173,10 @@ async function syncClientBreakdown() {
     const title = p.properties['Name']?.title?.[0]?.plain_text ?? '';
     return title.includes(CLIENT_DIVIDER_MARKER);
   });
+  console.log(`[clientBreakdown] allTasks=${allTasks.length} openTasks=${openTasks.length} existingDividers=${existingDividers.length}`);
 
   const doneMap = buildDoneMap(allTasks);
 
-  // Build pending task sets per client for stage ordering
   const pendingMap = new Map();
   for (const task of openTasks) {
     const clientId = getClientId(task);
@@ -187,7 +186,6 @@ async function syncClientBreakdown() {
     pendingMap.get(clientId).add(num);
   }
 
-  // Build client metadata with stage index for ordering
   const clientMeta = clients.map(client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
@@ -197,22 +195,20 @@ async function syncClientBreakdown() {
     return { clientId, name, stageIndex };
   });
 
-  // Sort clients: least advanced stage first (Onboarding at top), then alphabetical
   clientMeta.sort((a, b) =>
     a.stageIndex - b.stageIndex || a.name.localeCompare(b.name)
   );
 
-  // Build per-client task lists (eligible, open, sorted by priority)
   const tasksByClient = new Map();
-  for (const { clientId } of clientMeta) {
+  for (const { clientId, name } of clientMeta) {
     const clientTasks = openTasks
       .filter(t => getClientId(t) === clientId)
       .filter(t => isEligible(t, doneMap));
     clientTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
     tasksByClient.set(clientId, clientTasks);
+    console.log(`[clientBreakdown] ${name}: ${clientTasks.length} eligible tasks`);
   }
 
-  // Ensure client divider pages exist for active clients, archive stale ones
   const neededDividerNames = new Set(
     clientMeta
       .filter(({ clientId }) => (tasksByClient.get(clientId) ?? []).length > 0)
@@ -231,7 +227,6 @@ async function syncClientBreakdown() {
     existingDividers.map(d => [d.properties['Name']?.title?.[0]?.plain_text ?? '', d])
   );
 
-  // Assign Client Slot numbers: divider gets slot N, client tasks follow sequentially
   const updates = [];
   const assignedIds = new Set();
   let slotCounter = 1;
@@ -250,7 +245,7 @@ async function syncClientBreakdown() {
           'Client Slot': { number: slotCounter },
         },
       });
-      console.log(`[clientBreakdown] Created divider: "${divName}" → slot ${slotCounter}`);
+      console.log(`[clientBreakdown] Created divider: "${divName}" -> slot ${slotCounter}`);
       slotCounter++;
     } else {
       const divPage = existingDividersByName.get(divName);
@@ -271,7 +266,6 @@ async function syncClientBreakdown() {
     }
   }
 
-  // Clear Client Slot for open tasks not assigned in this run
   for (const task of openTasks) {
     if (!assignedIds.has(task.id)) {
       const currentSlot = task.properties['Client Slot']?.number ?? null;
