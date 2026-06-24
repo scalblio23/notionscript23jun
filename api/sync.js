@@ -28,7 +28,6 @@ function calcPriorityScore(page) {
   const props = page.properties;
   const taskPriority = props['Task Priority']?.select?.name ?? '';
   const clientPriority = props['Client Priority']?.select?.name ?? '';
-  const taskType = props['Type']?.select?.name ?? '';
   const onboardingStage = props['Onboarding Stage']?.select?.name ?? '';
   const taskName = (props['Name']?.title?.[0]?.plain_text ?? '').toLowerCase();
 
@@ -41,20 +40,20 @@ function calcPriorityScore(page) {
     clientPriority === 'Med' ? 1 :
     clientPriority === 'Low' ? 2 : 3;
 
-  // Rule 3: Task Type (Onboarding before regular tasks)
-  const taskTypeRank = taskType === 'Onboarding' ? 0 : 1;
+  // Rule 3: Task Type (Onboarding-related stages before regular tasks)
+  const onboardingStages = new Set(['Onboarding', 'Day 1', 'Day 2', 'Day 3', 'Client Assets']);
+  const taskTypeRank = onboardingStages.has(onboardingStage) ? 0 : 1;
 
   // Rule 4: Message tasks rank higher within their group
   const messageRank = taskName.includes('message') ? 0 : 1;
 
-  // Rule 5: Onboarding Stage sequence (only for Onboarding type)
-  const stageRank = taskType === 'Onboarding'
-    ? (onboardingStage === 'Onboarding' ? 0 :
-       onboardingStage === 'Day 1' ? 1 :
-       onboardingStage === 'Day 2' ? 2 :
-       onboardingStage === 'Day 3' ? 3 :
-       onboardingStage === 'Client Assets' ? 4 : 5)
-    : 0;
+  // Rule 5: Onboarding Stage sequence
+  const stageRank =
+    onboardingStage === 'Onboarding' ? 0 :
+    onboardingStage === 'Day 1' ? 1 :
+    onboardingStage === 'Day 2' ? 2 :
+    onboardingStage === 'Day 3' ? 3 :
+    onboardingStage === 'Client Assets' ? 4 : 5;
 
   // Rule 6: Task Priority
   const taskPriorityRank =
@@ -94,10 +93,9 @@ function selectTop7WithMinTasks(sectionTasks, min = 2) {
   const extraTasks = rest.filter(isTaskType).slice(0, needed);
   if (extraTasks.length === 0) return top7;
 
-  // Remove the lowest-priority non-Task tasks from top7 to make room
   const nonTaskInTop7 = top7
     .filter(t => !isTaskType(t))
-    .sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a)); // worst first
+    .sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a));
 
   const toRemove = new Set(nonTaskInTop7.slice(0, extraTasks.length).map(t => t.id));
   const result = [...top7.filter(t => !toRemove.has(t.id)), ...extraTasks];
@@ -130,7 +128,6 @@ async function getAllOpenPages() {
 async function ensureDividers(existingDividers) {
   const validNames = new Set(DIVIDERS.map(d => d.name));
 
-  // Archive stale dividers that no longer match current names
   for (const page of existingDividers) {
     const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
     if (!validNames.has(title)) {
@@ -186,7 +183,6 @@ async function syncFocusSlots() {
       assignedIds.add(task.id);
     });
 
-    // Clear slots for section tasks not in top7
     sectionTasks.filter(t => !top7.includes(t)).forEach(task => {
       if (getCurrentFocusSlot(task) !== null) {
         updates.push({ id: task.id, slot: null });
@@ -195,14 +191,12 @@ async function syncFocusSlots() {
     });
   }
 
-  // Clear slots for tasks with no matching role section
   for (const task of tasks) {
     if (!assignedIds.has(task.id) && getCurrentFocusSlot(task) !== null) {
       updates.push({ id: task.id, slot: null });
     }
   }
 
-  // Ensure divider slots are correct
   for (const div of DIVIDERS) {
     const page = dividerPages.find(
       p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
