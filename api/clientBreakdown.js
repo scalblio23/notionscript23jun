@@ -148,8 +148,23 @@ function clientDividerName(clientName) {
   return `${CLIENT_DIVIDER_MARKER} ${clientName.toUpperCase()} ${CLIENT_DIVIDER_MARKER}`;
 }
 
+async function ensureClientSlotProperty() {
+  const db = await notion.databases.retrieve({ database_id: DATABASE_ID });
+  if (!db.properties['Client Slot']) {
+    await notion.databases.update({
+      database_id: DATABASE_ID,
+      properties: {
+        'Client Slot': { number: { format: 'number' } },
+      },
+    });
+    console.log('[clientBreakdown] Created "Client Slot" property on task database');
+  }
+}
+
 async function syncClientBreakdown() {
   console.log('[clientBreakdown] Starting client breakdown sync...');
+
+  await ensureClientSlotProperty();
 
   const [allPages, clients] = await Promise.all([getAllPages(), getAllClients()]);
 
