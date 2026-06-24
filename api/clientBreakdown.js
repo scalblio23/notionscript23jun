@@ -5,7 +5,8 @@ const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 
 const DIVIDER_MARKER = '━━━';
-const CLIENT_DIVIDER_MARKER = '───';
+const CLIENT_DIVIDER_EMOJI = '🧑';
+const LEGACY_CLIENT_DIVIDER_MARKER = '───';
 
 const TASK_DEPENDENCIES = {
   7:  [6],
@@ -30,9 +31,13 @@ function getClientId(page) {
   return page.properties['Client']?.relation?.[0]?.id ?? null;
 }
 
+function isClientDivider(title) {
+  return title.includes(CLIENT_DIVIDER_EMOJI) || title.includes(LEGACY_CLIENT_DIVIDER_MARKER);
+}
+
 function isDivider(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
-  return title.includes(DIVIDER_MARKER) || title.includes(CLIENT_DIVIDER_MARKER);
+  return title.includes(DIVIDER_MARKER) || isClientDivider(title);
 }
 
 function buildDoneMap(allTasks) {
@@ -143,7 +148,7 @@ async function getAllClients() {
 }
 
 function clientDividerName(clientName) {
-  return `${CLIENT_DIVIDER_MARKER} ${clientName.toUpperCase()} ${CLIENT_DIVIDER_MARKER}`;
+  return `${CLIENT_DIVIDER_EMOJI} ━━━━━━━━━━━━ ${clientName.toUpperCase()} ━━━━━━━━━━━━ ${CLIENT_DIVIDER_EMOJI}`;
 }
 
 async function ensureClientSlotProperty() {
@@ -165,15 +170,13 @@ async function syncClientBreakdown() {
   await ensureClientSlotProperty();
 
   const [allPages, clients] = await Promise.all([getAllPages(), getAllClients()]);
-  console.log(`[clientBreakdown] allPages=${allPages.length} clients=${clients.length}`);
 
   const allTasks = allPages.filter(p => !isDivider(p));
   const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
   const existingDividers = allPages.filter(p => {
     const title = p.properties['Name']?.title?.[0]?.plain_text ?? '';
-    return title.includes(CLIENT_DIVIDER_MARKER);
+    return isClientDivider(title);
   });
-  console.log(`[clientBreakdown] allTasks=${allTasks.length} openTasks=${openTasks.length} existingDividers=${existingDividers.length}`);
 
   const doneMap = buildDoneMap(allTasks);
 
@@ -200,13 +203,12 @@ async function syncClientBreakdown() {
   );
 
   const tasksByClient = new Map();
-  for (const { clientId, name } of clientMeta) {
+  for (const { clientId } of clientMeta) {
     const clientTasks = openTasks
       .filter(t => getClientId(t) === clientId)
       .filter(t => isEligible(t, doneMap));
     clientTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
     tasksByClient.set(clientId, clientTasks);
-    console.log(`[clientBreakdown] ${name}: ${clientTasks.length} eligible tasks`);
   }
 
   const neededDividerNames = new Set(
