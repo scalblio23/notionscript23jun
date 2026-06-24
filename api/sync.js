@@ -81,6 +81,30 @@ function getCurrentFocusSlot(page) {
   return prop.number;
 }
 
+function selectTop7WithMinTasks(sectionTasks, min = 2) {
+  const top7 = sectionTasks.slice(0, 7);
+  const rest = sectionTasks.slice(7);
+
+  const isTaskType = t => (t.properties['Type']?.select?.name ?? '') === 'Task';
+  const taskCount = top7.filter(isTaskType).length;
+  const needed = Math.max(0, min - taskCount);
+
+  if (needed === 0) return top7;
+
+  const extraTasks = rest.filter(isTaskType).slice(0, needed);
+  if (extraTasks.length === 0) return top7;
+
+  // Remove the lowest-priority non-Task tasks from top7 to make room
+  const nonTaskInTop7 = top7
+    .filter(t => !isTaskType(t))
+    .sort((a, b) => calcPriorityScore(b) - calcPriorityScore(a)); // worst first
+
+  const toRemove = new Set(nonTaskInTop7.slice(0, extraTasks.length).map(t => t.id));
+  const result = [...top7.filter(t => !toRemove.has(t.id)), ...extraTasks];
+  result.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
+  return result;
+}
+
 async function getAllOpenPages() {
   const pages = [];
   let cursor;
@@ -151,12 +175,21 @@ async function syncFocusSlots() {
 
   for (const section of ROLE_SECTIONS) {
     const sectionTasks = tasks.filter(t => getPrimaryRole(t) === section.role);
+    const top7 = selectTop7WithMinTasks(sectionTasks);
 
-    sectionTasks.forEach((task, i) => {
-      const desired = i < 7 ? section.start + i : null;
+    top7.forEach((task, i) => {
+      const desired = section.start + i;
       const current = getCurrentFocusSlot(task);
       if (current !== desired) {
         updates.push({ id: task.id, slot: desired });
+      }
+      assignedIds.add(task.id);
+    });
+
+    // Clear slots for section tasks not in top7
+    sectionTasks.filter(t => !top7.includes(t)).forEach(task => {
+      if (getCurrentFocusSlot(task) !== null) {
+        updates.push({ id: task.id, slot: null });
       }
       assignedIds.add(task.id);
     });
