@@ -4,16 +4,16 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
 const ROLE_SECTIONS = [
-  { role: 'Operator',      start: 2,  end: 8  },
-  { role: 'Founder',       start: 10, end: 16 },
-  { role: 'CSM Assistant', start: 18, end: 24 },
+  { role: 'CSM Assistant', start: 2,  end: 8  },
+  { role: 'Operator',      start: 10, end: 16 },
+  { role: 'Founder',       start: 18, end: 24 },
   { role: 'Creative',      start: 26, end: 32 },
 ];
 
 const DIVIDERS = [
-  { slot: 1,  name: '🦊 ━━━━━━━━━━━━ OPERATOR ━━━━━━━━━━━━ 🦊' },
-  { slot: 9,  name: '🦁 ━━━━━━━━━━━━ FOUNDER ━━━━━━━━━━━━ 🦁' },
-  { slot: 17, name: '🦉 ━━━━━━━━━━━━ CSM ASSISTANT ━━━━━━━━━━━━ 🦉' },
+  { slot: 1,  name: '🦉 ━━━━━━━━━━━━ CSM ASSISTANT ━━━━━━━━━━━━ 🦉' },
+  { slot: 9,  name: '🦊 ━━━━━━━━━━━━ OPERATOR ━━━━━━━━━━━━ 🦊' },
+  { slot: 17, name: '🦁 ━━━━━━━━━━━━ FOUNDER ━━━━━━━━━━━━ 🦁' },
   { slot: 25, name: '🦕 ━━━━━━━━━━━━ CREATIVE ━━━━━━━━━━━━ 🦕' },
 ];
 
