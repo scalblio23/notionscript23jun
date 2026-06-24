@@ -80,7 +80,7 @@ async function createTasksForClient(clientPageId) {
       parent: { database_id: TASK_DB_ID },
       properties: {
         'Name': {
-          title: [{ text: { content: task.name } }],
+          title: [{ text: { content: `${task.number} - ${task.name}` } }],
         },
         'Client': {
           relation: [{ id: clientPageId }],
