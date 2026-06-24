@@ -5,14 +5,6 @@ const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const COMM_BOARD_BLOCK_ID = '38924f67814f80f49992d1f780f379ab';
 
-const STAGE_MESSAGES = [
-  { stage: 'Onboarding',    message: 'Send Onboarding Message' },
-  { stage: 'Day 1',         message: 'Send Day 1 Message' },
-  { stage: 'Day 2',         message: 'Send Day 2 Message' },
-  { stage: 'Day 3',         message: 'Send Day 3 Message' },
-  { stage: 'Client Assets', message: 'Request Client Assets' },
-];
-
 const STAGE_DUE_OFFSET = {
   'Onboarding':    1,
   'Day 1':         2,
@@ -33,12 +25,16 @@ const TASK_DEPENDENCIES = {
   30: [6], 31: [6], 32: [6], 33: [6], 34: [6],
 };
 
-const COMM_STAGES = new Set(STAGE_MESSAGES.map(s => s.stage));
-
 function getTaskNumber(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
   const match = title.match(/^(\d+)\s*-/);
   return match ? parseInt(match[1]) : null;
+}
+
+function getTaskShortName(page) {
+  const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
+  const match = title.match(/^\d+\s*-\s*(.+)$/);
+  return match ? match[1].trim() : title;
 }
 
 function getClientId(page) {
@@ -98,37 +94,40 @@ function diffDays(a, b) {
   return Math.floor((a - b) / (1000 * 60 * 60 * 24));
 }
 
-function getCommsForClient(clientId, openTasks, doneMap, startDate, today) {
-  const clientTasks = openTasks
-    .filter(t => getClientId(t) === clientId)
-    .filter(t => isEligible(t, doneMap))
-    .filter(t => COMM_STAGES.has(getOnboardingStage(t)));
+function isEditedToday(page, today) {
+  const edited = page.last_edited_time;
+  if (!edited) return false;
+  const d = new Date(edited);
+  d.setHours(0, 0, 0, 0);
+  // compare using same timezone-adjusted today
+  return d.getTime() === today.getTime() || d.getTime() === today.getTime() - 86400000;
+}
 
-  let overdue = null;
-  let dueToday = null;
-
-  for (const task of clientTasks) {
-    const stage = getOnboardingStage(task);
-    const msgEntry = STAGE_MESSAGES.find(s => s.stage === stage);
-    if (!msgEntry) continue;
-
-    const due = getTaskDueDate(task, startDate);
-    if (!due) {
-      if (!dueToday) dueToday = msgEntry.message;
-      continue;
-    }
-
-    const d = diffDays(today, due);
-    if (d > 0) {
-      if (!overdue || d > overdue.days) overdue = { message: msgEntry.message, days: d };
-    } else if (d === 0) {
-      if (!dueToday) dueToday = msgEntry.message;
-    }
+function buildClientBlock(name, doing, done) {
+  const lines = [];
+  if (doing.length > 0) {
+    lines.push('▶ Doing');
+    doing.forEach(t => lines.push(`  • ${t}`));
   }
+  if (done.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push('✓ Done today');
+    done.forEach(t => lines.push(`  • ${t}`));
+  }
+  if (lines.length === 0) lines.push('— Nothing active');
 
-  if (overdue) return { bucket: 'eod', message: overdue.message, days: overdue.days };
-  if (dueToday) return { bucket: 'sod', message: dueToday };
-  return null;
+  return {
+    type: 'callout',
+    callout: {
+      rich_text: [{ text: { content: name }, annotations: { bold: true } }],
+      icon: { emoji: '👤' },
+      color: 'default',
+      children: [{
+        type: 'paragraph',
+        paragraph: { rich_text: [{ text: { content: lines.join('\n') } }] },
+      }],
+    },
+  };
 }
 
 async function getAllTasks() {
@@ -170,59 +169,6 @@ async function safeDeleteBlock(blockId) {
   }
 }
 
-function buildSectionBlocks(label, emoji, entries) {
-  const sodEntries = entries.filter(e => e.bucket === 'sod');
-  const eodEntries = entries.filter(e => e.bucket === 'eod');
-
-  const blocks = [
-    {
-      type: 'heading_3',
-      heading_3: {
-        rich_text: [{ text: { content: `${emoji} ${label}` } }],
-        color: 'default',
-      },
-    },
-  ];
-
-  // SOD callout
-  const sodLines = sodEntries.length > 0
-    ? sodEntries.map(e => `• ${e.name} — ${e.message}`).join('\n')
-    : 'Nothing to send';
-
-  blocks.push({
-    type: 'callout',
-    callout: {
-      rich_text: [{ text: { content: '🌅  SOD' }, annotations: { bold: true } }],
-      icon: { emoji: '🌅' },
-      color: 'yellow_background',
-      children: [{
-        type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: sodLines } }] },
-      }],
-    },
-  });
-
-  // EOD callout
-  const eodLines = eodEntries.length > 0
-    ? eodEntries.map(e => `• ${e.name} — ${e.message}${e.days > 1 ? ` (${e.days} days overdue)` : ' (overdue)'}`).join('\n')
-    : 'Nothing to follow up';
-
-  blocks.push({
-    type: 'callout',
-    callout: {
-      rich_text: [{ text: { content: '🌆  EOD' }, annotations: { bold: true } }],
-      icon: { emoji: '🌆' },
-      color: 'orange_background',
-      children: [{
-        type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: eodLines } }] },
-      }],
-    },
-  });
-
-  return blocks;
-}
-
 async function updateCommBoard() {
   console.log('[commBoard] Building communication board...');
 
@@ -233,44 +179,83 @@ async function updateCommBoard() {
   const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
   const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
+  const doneTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') === 'Done');
   const doneMap = buildDoneMap(allTasks);
 
-  const pendingClients = clients.filter(
+  const onboardingClients = clients.filter(
     c => c.properties['Onboarding Status']?.select?.name === 'Pending'
   );
-  const completeClients = clients.filter(
+  const activeClients = clients.filter(
     c => c.properties['Onboarding Status']?.select?.name === 'Onboarding Complete'
   );
 
-  function buildEntries(clientList) {
-    const entries = [];
+  function buildClientCards(clientList) {
+    const cards = [];
     for (const client of clientList) {
+      const clientId = client.id;
       const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
       const startDate = getStartDate(client);
-      const comms = getCommsForClient(client.id, openTasks, doneMap, startDate, today);
-      if (comms) entries.push({ name, ...comms });
+
+      // Tasks due today or overdue that are still open and eligible
+      const doing = openTasks
+        .filter(t => getClientId(t) === clientId)
+        .filter(t => isEligible(t, doneMap))
+        .filter(t => {
+          const due = getTaskDueDate(t, startDate);
+          if (!due) return false;
+          return diffDays(today, due) >= 0;
+        })
+        .map(getTaskShortName);
+
+      // Tasks marked Done with last_edited_time today
+      const done = doneTasks
+        .filter(t => getClientId(t) === clientId)
+        .filter(t => isEditedToday(t, today))
+        .map(getTaskShortName);
+
+      if (doing.length > 0 || done.length > 0) {
+        cards.push(buildClientBlock(name, doing, done));
+      }
     }
-    return entries;
+    return cards;
   }
 
-  const pendingEntries = buildEntries(pendingClients);
-  const completeEntries = buildEntries(completeClients);
+  const onboardingCards = buildClientCards(onboardingClients);
+  const activeCards = buildClientCards(activeClients);
 
   const existing = await notion.blocks.children.list({ block_id: COMM_BOARD_BLOCK_ID });
   for (const block of existing.results) {
     await safeDeleteBlock(block.id);
   }
 
-  const children = [
-    ...buildSectionBlocks('PENDING CLIENTS', '🟡', pendingEntries),
-    { type: 'divider', divider: {} },
-    ...buildSectionBlocks('ONBOARDING COMPLETE', '✅', completeEntries),
-  ];
+  function columnBlock(heading, cards) {
+    const children = [
+      {
+        type: 'heading_3',
+        heading_3: { rich_text: [{ text: { content: heading } }], color: 'default' },
+      },
+      ...(cards.length > 0 ? cards : [{
+        type: 'paragraph',
+        paragraph: { rich_text: [{ text: { content: 'Nothing active' } }] },
+      }]),
+    ];
+    return { type: 'column', column: { children } };
+  }
 
-  await notion.blocks.children.append({ block_id: COMM_BOARD_BLOCK_ID, children });
+  const layout = {
+    type: 'column_list',
+    column_list: {
+      children: [
+        columnBlock('🟡 Onboarding Clients', onboardingCards),
+        columnBlock('✅ Active Clients', activeCards),
+      ],
+    },
+  };
 
-  console.log(`[commBoard] Done — ${pendingEntries.length} pending, ${completeEntries.length} complete`);
-  return { pendingComms: pendingEntries.length, completeComms: completeEntries.length };
+  await notion.blocks.children.append({ block_id: COMM_BOARD_BLOCK_ID, children: [layout] });
+
+  console.log(`[commBoard] Done — ${onboardingCards.length} onboarding, ${activeCards.length} active`);
+  return { onboardingComms: onboardingCards.length, activeComms: activeCards.length };
 }
 
 module.exports = { updateCommBoard };
