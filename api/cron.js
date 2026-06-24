@@ -1,17 +1,16 @@
 const { syncFocusSlots } = require('./sync');
+const { syncCCF } = require('./ccf');
 
 module.exports = async function handler(req, res) {
-  // Vercel cron jobs send GET requests; guard against public invocation
-  const authHeader = req.headers['authorization'];
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
   try {
-    const result = await syncFocusSlots();
-    return res.status(200).json({ ok: true, ...result });
+    const [focusResult, ccfResult] = await Promise.all([
+      syncFocusSlots(),
+      syncCCF(),
+    ]);
+
+    return res.status(200).json({ ok: true, focusResult, ccfResult });
   } catch (err) {
-    console.error('[cron] Error during sync:', err);
+    console.error('[cron] Error:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 };
