@@ -112,23 +112,38 @@ function diffDays(a, b) {
 async function generateMessage(clientName, daysOld, tasks) {
   const taskList = tasks.join(', ');
 
-  const prompt = `You are a comms assistant at a digital marketing agency writing a WhatsApp message to send to a client.
+  const prompt = `You write short WhatsApp messages on behalf of an Australian digital marketing agency owner.
+
+Style rules:
+- Max 15 words total
+- Casual, direct, friendly — like texting a mate
+- Use "Hey [name]" to open
+- Short punchy sentences, sometimes incomplete
+- Occasionally use "will" statements: "Will keep you updated"
+- No corporate speak, no fluff
+- No more than one emoji, often none
+- Australian informal tone
+
+Examples of the style:
+"Hey mate will post the stats shortly"
+"Hey Christian thanks for completing the form! Will start the campaign process now"
+"Working on your campaign today, hoping to go live tomorrow"
 
 Client: ${clientName} (day ${daysOld ?? '?'} of onboarding)
-Pending tasks for this client today: ${taskList}
+What needs to happen: ${taskList}
 
-Write a short, warm, slightly witty WhatsApp message (2-3 sentences max) that naturally nudges the client on what's needed. Sound like a real person. One emoji max. Do not open with "Hi" or the client name. Write only the message text.`;
+Write the message. 15 words max. Nothing else.`;
 
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      max_tokens: 60,
       messages: [{ role: 'user', content: prompt }],
     });
     return msg.content[0]?.text?.trim() ?? taskList;
   } catch (err) {
     console.error(`[commBoard] LLM error for ${clientName}:`, err.message);
-    return `Pending: ${taskList}.`;
+    return `Hey ${clientName}, just need: ${tasks[0]}.`;
   }
 }
 
@@ -210,7 +225,6 @@ async function updateCommBoard() {
     return status === 'Pending' || status === 'Onboarding Complete';
   });
 
-  // Build todos in parallel
   const results = await Promise.all(activeClients.map(async client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
