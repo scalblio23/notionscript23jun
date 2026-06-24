@@ -4,7 +4,6 @@ const { updateQuote } = require('./quote');
 const { updateProgressTracker } = require('./tracker');
 const { syncClientBreakdown } = require('./clientBreakdown');
 const { updatePendingBoard } = require('./pendingBoard');
-const { updateCommBoard } = require('./commBoard');
 
 async function safeRun(name, fn) {
   try {
@@ -16,14 +15,13 @@ async function safeRun(name, fn) {
 }
 
 module.exports = async function handler(req, res) {
-  const [focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult, commResult] = await Promise.all([
+  const [focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult] = await Promise.all([
     safeRun('sync', syncFocusSlots),
     safeRun('ccf', syncCCF),
     safeRun('quote', updateQuote),
     safeRun('tracker', updateProgressTracker),
     safeRun('clientBreakdown', syncClientBreakdown),
     safeRun('pendingBoard', updatePendingBoard),
-    safeRun('commBoard', updateCommBoard),
   ]);
-  return res.status(200).json({ ok: true, focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult, commResult });
+  return res.status(200).json({ ok: true, focusResult, ccfResult, quoteResult, trackerResult, breakdownResult, boardResult });
 };
