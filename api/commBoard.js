@@ -144,7 +144,6 @@ Write a short narrative summary of where things stand for this client today.`;
 }
 
 function buildClientBlock(name, narrative) {
-  // All content in rich_text — no children, avoids Notion 2-level nesting limit
   return {
     type: 'callout',
     callout: {
@@ -191,10 +190,27 @@ async function getAllClients() {
 async function safeDeleteBlock(blockId) {
   try {
     await notion.blocks.delete({ block_id: blockId });
+    return true;
   } catch (err) {
-    if (err.code === 'validation_error') return;
+    if (err.code === 'validation_error') return false;
     throw err;
   }
+}
+
+async function deleteAllChildren(blockId) {
+  let cursor;
+  let total = 0;
+  let deleted = 0;
+  do {
+    const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
+    total += res.results.length;
+    for (const block of res.results) {
+      const ok = await safeDeleteBlock(block.id);
+      if (ok) deleted++;
+    }
+    cursor = res.has_more ? res.next_cursor : undefined;
+  } while (cursor);
+  console.log(`[commBoard] Cleared ${deleted}/${total} existing block(s)`);
 }
 
 async function updateCommBoard() {
@@ -217,35 +233,37 @@ async function updateCommBoard() {
     c => c.properties['Onboarding Status']?.select?.name === 'Onboarding Complete'
   );
 
+  function getClientData(client) {
+    const clientId = client.id;
+    const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
+    const startDate = getStartDate(client);
+    const daysOld = getDaysOld(client);
+
+    const doing = openTasks
+      .filter(t => getClientId(t) === clientId)
+      .filter(t => isEligible(t, doneMap))
+      .filter(t => {
+        const due = getTaskDueDate(t, startDate);
+        if (!due) return false;
+        return diffDays(today, due) >= 0;
+      })
+      .map(getTaskShortName);
+
+    const done = doneTasks
+      .filter(t => getClientId(t) === clientId)
+      .filter(t => isEditedToday(t, today))
+      .map(getTaskShortName);
+
+    return { name, daysOld, doing, done };
+  }
+
   async function buildClientCards(clientList) {
-    const cards = [];
-    for (const client of clientList) {
-      const clientId = client.id;
-      const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
-      const startDate = getStartDate(client);
-      const daysOld = getDaysOld(client);
-
-      const doing = openTasks
-        .filter(t => getClientId(t) === clientId)
-        .filter(t => isEligible(t, doneMap))
-        .filter(t => {
-          const due = getTaskDueDate(t, startDate);
-          if (!due) return false;
-          return diffDays(today, due) >= 0;
-        })
-        .map(getTaskShortName);
-
-      const done = doneTasks
-        .filter(t => getClientId(t) === clientId)
-        .filter(t => isEditedToday(t, today))
-        .map(getTaskShortName);
-
-      if (doing.length === 0 && done.length === 0) continue;
-
-      const narrative = await generateNarrative(name, daysOld, doing, done);
-      cards.push(buildClientBlock(name, narrative));
-    }
-    return cards;
+    const active = clientList.map(getClientData).filter(d => d.doing.length > 0 || d.done.length > 0);
+    // Generate all narratives in parallel
+    const narratives = await Promise.all(
+      active.map(d => generateNarrative(d.name, d.daysOld, d.doing, d.done))
+    );
+    return active.map((d, i) => buildClientBlock(d.name, narratives[i]));
   }
 
   const [onboardingCards, activeCards] = await Promise.all([
@@ -253,10 +271,7 @@ async function updateCommBoard() {
     buildClientCards(activeClients),
   ]);
 
-  const existing = await notion.blocks.children.list({ block_id: COMM_BOARD_BLOCK_ID });
-  for (const block of existing.results) {
-    await safeDeleteBlock(block.id);
-  }
+  await deleteAllChildren(COMM_BOARD_BLOCK_ID);
 
   function columnBlock(heading, cards) {
     const children = [

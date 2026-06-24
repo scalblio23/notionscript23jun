@@ -69,21 +69,27 @@ async function getAllClients() {
 async function safeDeleteBlock(blockId) {
   try {
     await notion.blocks.delete({ block_id: blockId });
+    return true;
   } catch (err) {
-    if (err.code === 'validation_error') return;
+    if (err.code === 'validation_error') return false;
     throw err;
   }
 }
 
 async function deleteAllChildren(blockId) {
   let cursor;
+  let total = 0;
+  let deleted = 0;
   do {
     const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
+    total += res.results.length;
     for (const block of res.results) {
-      await safeDeleteBlock(block.id);
+      const ok = await safeDeleteBlock(block.id);
+      if (ok) deleted++;
     }
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
+  console.log(`[tracker] Cleared ${deleted}/${total} existing block(s)`);
 }
 
 async function updateProgressTracker() {
