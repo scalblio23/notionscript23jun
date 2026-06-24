@@ -15,7 +15,19 @@ const CCF_TASKS = [
   { number: 5,  name: 'Terms of service signed',   stage: 'Onboarding',    roles: ['Operator'] },
   { number: 6,  name: 'Strategy (Campaign Brief)', stage: 'Day 1',         roles: ['Founder'] },
   { number: 7,  name: 'Funnel Template',           stage: 'Day 1',         roles: ['Operator'] },
-  { number: 8,  name: 'Message (EOD)',              stage: 'Day 1',         roles: ['CSM Assistant'] },
+  { number: 8,  name: 'Message (EOD)',              stage: 'Day 1',         roles: ['CSM Assistant'],
+    comment: `Hey [Client] just to give you an update
+
+We have completed your funnel, server and domain - basically the infrastructure needed for your ads
+
+What we need to cover as we finalise the page is how you take bookings - do you use calendly or another booking system, or would you just simply want us to send jobs?
+
+Tomorrow we will be working on the ads, and booking setup.
+
+We are looking to go live as planned on Wednesday and Thursday - which will commence your service time.
+
+Cheers mate,
+Henry` },
   { number: 10, name: 'Domain',                    stage: 'Day 1',         roles: ['Operator'] },
   { number: 11, name: 'Github Repo',               stage: 'Day 1',         roles: ['Operator'] },
   { number: 12, name: 'Server',                    stage: 'Day 1',         roles: ['Operator'] },
@@ -24,15 +36,46 @@ const CCF_TASKS = [
   { number: 15, name: 'Ad Copy',                   stage: 'Day 2',         roles: ['Creative', 'Operator'] },
   { number: 16, name: 'Ad Targeting / Setup',      stage: 'Day 2',         roles: ['Operator'] },
   { number: 17, name: 'Booking System',            stage: 'Day 2',         roles: ['Operator'] },
-  { number: 18, name: 'Message (Morning)',          stage: 'Day 2',         roles: ['CSM Assistant'] },
-  { number: 19, name: 'Message (EOD)',              stage: 'Day 2',         roles: ['CSM Assistant'] },
+  { number: 18, name: 'Message (Morning)',          stage: 'Day 2',         roles: ['CSM Assistant'],
+    comment: `Hey [Client] sounds good, working on creatives today for ads
+
+Ready to go live tomorrow
+
+Ill report back close to EOD on progress` },
+  { number: 19, name: 'Message (EOD)',              stage: 'Day 2',         roles: ['CSM Assistant'],
+    comment: `Hi [Client], yep will be good to go live tomorrow with the first campaign` },
   { number: 20, name: 'Ad Creatives Approved',     stage: 'Day 3',         roles: ['Founder'] },
   { number: 21, name: 'Ad Setup + Structure',      stage: 'Day 3',         roles: ['Operator'] },
-  { number: 22, name: 'Message (EOD)',              stage: 'Day 3',         roles: ['CSM Assistant'] },
+  { number: 22, name: 'Message (EOD)',              stage: 'Day 3',         roles: ['CSM Assistant'],
+    comment: `Hey @[Client] good news we are all live and running!
+
+If you have any questions let me know
+
+There will be 1-3 days of testing as leads come through and we start getting feedback on the leads come through
+
+This also represents the start of your service time
+
+Thanks!` },
   { number: 23, name: 'Launch',                    stage: 'Day 3',         roles: ['Operator'] },
-  { number: 24, name: 'Message (Morning)',          stage: 'Day 3',         roles: ['CSM Assistant'] },
+  { number: 24, name: 'Message (Morning)',          stage: 'Day 3',         roles: ['CSM Assistant'],
+    comment: `Hi [Client] good morning!
+
+Today is the day!
+
+We will be going live
+
+We will keep you updated throughout the day and let you know if we have any questions` },
   { number: 25, name: 'Final Details',             stage: 'Day 3',         roles: ['Founder'] },
-  { number: 26, name: 'Confirmation Message',      stage: 'Day 3',         roles: ['CSM Assistant'] },
+  { number: 26, name: 'Confirmation Message',      stage: 'Day 3',         roles: ['CSM Assistant'],
+    comment: `Hey [Client] thanks for the message,
+
+Next steps are we will
+
+• Review the form
+• Start creating the campaign
+• Get the campaign live by Wed, Thu (which is when your service period begins)
+
+In between now and then we will send you ad examples etc, and work back and forth to get things live!` },
   { number: 27, name: 'Booking System',            stage: 'Day 3',         roles: ['Operator'] },
   { number: 28, name: 'Automations',               stage: 'Day 3',         roles: ['Operator'] },
   { number: 29, name: 'Ad Launch',                 stage: 'Day 3',         roles: ['Operator'] },
@@ -74,9 +117,9 @@ async function getTriggeredClients() {
   return clients;
 }
 
-async function createTasksForClient(clientPageId) {
+async function createTasksForClient(clientPageId, clientName) {
   for (const task of CCF_TASKS) {
-    await notion.pages.create({
+    const page = await notion.pages.create({
       parent: { database_id: TASK_DB_ID },
       properties: {
         'Name': {
@@ -99,6 +142,14 @@ async function createTasksForClient(clientPageId) {
         },
       },
     });
+
+    if (task.comment) {
+      const text = task.comment.replace(/\[Client\]/g, clientName);
+      await notion.comments.create({
+        parent: { page_id: page.id },
+        rich_text: [{ text: { content: text } }],
+      });
+    }
 
     console.log(`[ccf] Created task "${task.number} - ${task.name}" [${task.stage}] [${task.roles.join(', ')}]`);
   }
@@ -128,7 +179,7 @@ async function syncCCF() {
     const clientName = client.properties?.['Name']?.title?.[0]?.plain_text || client.id;
     console.log(`[ccf] Processing client: ${clientName}`);
 
-    await createTasksForClient(client.id);
+    await createTasksForClient(client.id, clientName);
     await markClientDone(client.id);
   }
 
