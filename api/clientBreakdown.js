@@ -178,7 +178,7 @@ async function syncClientBreakdown() {
   const doneMap = buildDoneMap(allTasks);
 
   // Build pending task sets per client for stage ordering
-  const pendingMap = new Map(); // Map<clientId, Set<taskNumber>>
+  const pendingMap = new Map();
   for (const task of openTasks) {
     const clientId = getClientId(task);
     const num = getTaskNumber(task);
@@ -203,7 +203,7 @@ async function syncClientBreakdown() {
   );
 
   // Build per-client task lists (eligible, open, sorted by priority)
-  const tasksByClient = new Map(); // Map<clientId, page[]>
+  const tasksByClient = new Map();
   for (const { clientId } of clientMeta) {
     const clientTasks = openTasks
       .filter(t => getClientId(t) === clientId)
@@ -232,8 +232,8 @@ async function syncClientBreakdown() {
   );
 
   // Assign Client Slot numbers: divider gets slot N, client tasks follow sequentially
-  const updates = []; // { id, slot }
-  const assignedIds = new Set(); // all task IDs that should keep a slot
+  const updates = [];
+  const assignedIds = new Set();
   let slotCounter = 1;
 
   for (const { clientId, name } of clientMeta) {
@@ -242,7 +242,6 @@ async function syncClientBreakdown() {
 
     const divName = clientDividerName(name);
 
-    // Create divider if missing
     if (!existingDividersByName.has(divName)) {
       await notion.pages.create({
         parent: { database_id: DATABASE_ID },
@@ -262,7 +261,6 @@ async function syncClientBreakdown() {
       slotCounter++;
     }
 
-    // Assign slots to client tasks
     for (const task of tasks) {
       assignedIds.add(task.id);
       const currentSlot = task.properties['Client Slot']?.number ?? null;
