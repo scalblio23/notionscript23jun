@@ -126,15 +126,21 @@ function getScoreColor(score) {
   return 'green';
 }
 
+function buildRichText(name, daysOld, score, todayText, overdueText, upcomingText) {
+  const prefix = `${name} - Day ${daysOld ?? '?'} - `;
+  const suffix = `  |  Tasks today: ${todayText}  |  Overdue: ${overdueText}  |  Upcoming: ${upcomingText}`;
+  return [
+    { text: { content: prefix } },
+    { text: { content: `${score}%` }, annotations: { color: getScoreColor(score) } },
+    { text: { content: suffix } },
+  ];
+}
+
 async function getAllTasks() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({
-      database_id: TASK_DB_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const res = await notion.databases.query({ database_id: TASK_DB_ID, start_cursor: cursor, page_size: 100 });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
@@ -145,15 +151,22 @@ async function getAllClients() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({
-      database_id: CLIENT_DB_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const res = await notion.databases.query({ database_id: CLIENT_DB_ID, start_cursor: cursor, page_size: 100 });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
   return pages;
+}
+
+async function getCurrentChildren() {
+  const blocks = [];
+  let cursor;
+  do {
+    const res = await notion.blocks.children.list({ block_id: BOARD_BLOCK_ID, start_cursor: cursor, page_size: 100 });
+    blocks.push(...res.results);
+    cursor = res.has_more ? res.next_cursor : undefined;
+  } while (cursor);
+  return blocks;
 }
 
 async function safeDeleteBlock(blockId) {
@@ -162,24 +175,6 @@ async function safeDeleteBlock(blockId) {
   } catch (err) {
     if (err.code === 'validation_error') return;
     throw err;
-  }
-}
-
-async function deleteAllChildren(blockId) {
-  let cursor;
-  let total = 0;
-  do {
-    const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
-    total += res.results.length;
-    await Promise.all(res.results.map(b => safeDeleteBlock(b.id)));
-    cursor = res.has_more ? res.next_cursor : undefined;
-  } while (cursor);
-  // Verify block is empty before returning
-  const check = await notion.blocks.children.list({ block_id: blockId, page_size: 1 });
-  if (check.results.length > 0) {
-    await deleteAllChildren(blockId);
-  } else {
-    console.log(`[pendingBoard] Cleared ${total} block(s)`);
   }
 }
 
@@ -201,7 +196,7 @@ async function updatePendingBoard() {
 
   console.log(`[pendingBoard] ${pendingClients.length} pending client(s)`);
 
-  const rows = pendingClients.map(client => {
+  const desiredRows = pendingClients.map(client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const daysOld = getDaysOld(client);
@@ -225,46 +220,44 @@ async function updatePendingBoard() {
     }
 
     const score = calcEfficiencyScore(eligibleTasks, startDate, today);
-
     const todayText = dueToday.length > 0
       ? dueToday.slice(0, 2).map(getTaskShortName).join(', ') + (dueToday.length > 2 ? ` +${dueToday.length - 2} more` : '')
       : 'None';
-
-    const overdueText = overdue.length > 0
-      ? `${overdue.length} (e.g. ${getTaskShortName(overdue[0])})`
-      : 'None';
-
+    const overdueText = overdue.length > 0 ? `${overdue.length} (e.g. ${getTaskShortName(overdue[0])})` : 'None';
     const upcomingText = `${upcoming.length}`;
 
-    const prefix = `${name} - Day ${daysOld ?? '?'} - `;
-    const suffix = `  |  Tasks today: ${todayText}  |  Overdue: ${overdueText}  |  Upcoming: ${upcomingText}`;
-
-    return {
-      type: 'paragraph',
-      paragraph: {
-        rich_text: [
-          { text: { content: prefix } },
-          { text: { content: `${score}%` }, annotations: { color: getScoreColor(score) } },
-          { text: { content: suffix } },
-        ],
-      },
-    };
+    return buildRichText(name, daysOld, score, todayText, overdueText, upcomingText);
   });
 
-  await deleteAllChildren(BOARD_BLOCK_ID);
+  // Fetch existing blocks once
+  const existing = await getCurrentChildren();
 
-  if (rows.length === 0) {
-    await notion.blocks.children.append({
-      block_id: BOARD_BLOCK_ID,
-      children: [{ type: 'paragraph', paragraph: { rich_text: [{ text: { content: 'No pending clients.' } }] } }],
-    });
-    return { clientsShown: 0 };
+  // Update existing paragraph blocks in-place (no delete+append race condition)
+  const updateCount = Math.min(existing.length, desiredRows.length);
+  await Promise.all(
+    Array.from({ length: updateCount }, (_, i) =>
+      notion.blocks.update({ block_id: existing[i].id, paragraph: { rich_text: desiredRows[i] } })
+    )
+  );
+
+  // Append any extra rows needed
+  if (desiredRows.length > existing.length) {
+    const extra = desiredRows.slice(existing.length).map(rich_text => ({
+      type: 'paragraph',
+      paragraph: { rich_text },
+    }));
+    await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: extra });
   }
 
-  await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: rows });
+  // Delete any leftover blocks if we have fewer clients than before
+  if (existing.length > desiredRows.length) {
+    await Promise.all(
+      existing.slice(desiredRows.length).map(b => safeDeleteBlock(b.id))
+    );
+  }
 
-  console.log(`[pendingBoard] Board updated with ${rows.length} client(s)`);
-  return { clientsShown: rows.length };
+  console.log(`[pendingBoard] Board updated with ${desiredRows.length} client(s)`);
+  return { clientsShown: desiredRows.length };
 }
 
 module.exports = { updatePendingBoard };
