@@ -16,7 +16,10 @@ async function getAllOpenTasks() {
         property: 'Status',
         select: { does_not_equal: 'Done' },
       },
-      sorts: [{ property: 'Priority Score', direction: 'ascending' }],
+      sorts: [
+        { property: 'Priority Score', direction: 'ascending' },
+        { property: 'Client Priority Rank', direction: 'ascending' },
+      ],
       start_cursor: cursor,
       page_size: 100,
     });
