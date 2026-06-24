@@ -5,15 +5,6 @@ const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const BOARD_BLOCK_ID = '38924f67814f80988b67c5b861660521';
 
-const ROLES = ['CSM Assistant', 'Operator', 'Founder', 'Creative'];
-
-const ROLE_EMOJI = {
-  'CSM Assistant': '🦉',
-  'Operator':      '🦊',
-  'Founder':       '🦁',
-  'Creative':      '🦕',
-};
-
 const STAGE_MESSAGES = [
   { stage: 'Onboarding',    message: 'Send Onboarding Message' },
   { stage: 'Day 1',         message: 'Send Day 1 Message' },
@@ -56,10 +47,6 @@ function getTaskShortName(page) {
 
 function getClientId(page) {
   return page.properties['Client']?.relation?.[0]?.id ?? null;
-}
-
-function getPrimaryRole(page) {
-  return page.properties['Role']?.multi_select?.[0]?.name ?? null;
 }
 
 function getOnboardingStage(page) {
@@ -210,7 +197,6 @@ function buildCard({ name, daysOld, comms, overdue, dueToday, upcoming, score })
     bodyLines.push('✓ Clear');
   }
 
-  // All content in rich_text — no children, avoids Notion nesting limit
   const richText = [
     { text: { content: name }, annotations: { bold: true } },
     { text: { content: '\n' } },
@@ -268,6 +254,17 @@ async function safeDeleteBlock(blockId) {
   }
 }
 
+async function deleteAllChildren(blockId) {
+  let cursor;
+  do {
+    const res = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
+    for (const block of res.results) {
+      await safeDeleteBlock(block.id);
+    }
+    cursor = res.has_more ? res.next_cursor : undefined;
+  } while (cursor);
+}
+
 async function updatePendingBoard() {
   console.log('[pendingBoard] Building pending client board...');
 
@@ -317,10 +314,7 @@ async function updatePendingBoard() {
     return { name, daysOld, comms, overdue, dueToday, upcoming, score };
   });
 
-  const existing = await notion.blocks.children.list({ block_id: BOARD_BLOCK_ID });
-  for (const block of existing.results) {
-    await safeDeleteBlock(block.id);
-  }
+  await deleteAllChildren(BOARD_BLOCK_ID);
 
   if (cards.length === 0) {
     await notion.blocks.children.append({
@@ -330,21 +324,10 @@ async function updatePendingBoard() {
     return { clientsShown: 0 };
   }
 
-  const rows = [];
-  for (let i = 0; i < cards.length; i += 2) {
-    const pair = cards.slice(i, i + 2);
-    rows.push({
-      type: 'column_list',
-      column_list: {
-        children: pair.map(card => ({
-          type: 'column',
-          column: { children: [buildCard(card)] },
-        })),
-      },
-    });
-  }
-
-  await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: rows });
+  await notion.blocks.children.append({
+    block_id: BOARD_BLOCK_ID,
+    children: cards.map(buildCard),
+  });
 
   console.log(`[pendingBoard] Board updated with ${cards.length} client(s)`);
   return { clientsShown: cards.length };
