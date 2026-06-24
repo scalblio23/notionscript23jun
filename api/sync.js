@@ -47,7 +47,7 @@ const TASK_DEPENDENCIES = {
 
 function isDivider(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
-  return title.includes(DIVIDER_MARKER);
+  return title.includes(DIVIDER_MARKER) && !title.includes('🧑');
 }
 
 function getTaskNumber(page) {
