@@ -3,7 +3,25 @@ const { Client } = require('@notionhq/client');
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
-const FOCUS_SLOTS = 7;
+const ROLE_SECTIONS = [
+  { role: 'Operator',      start: 1,  end: 7  },
+  { role: 'Founder',       start: 9,  end: 15 },
+  { role: 'CSM Assistant', start: 17, end: 23 },
+  { role: 'Creative',      start: 25, end: 31 },
+];
+
+const DIVIDERS = [
+  { slot: 8,  name: '🦁 ━━━━━━━━━━━━ FOUNDER ━━━━━━━━━━━━ 🦁' },
+  { slot: 16, name: '🦉 ━━━━━━━━━━━━ CSM ASSISTANT ━━━━━━━━━━━━ 🦉' },
+  { slot: 24, name: '🦕 ━━━━━━━━━━━━ CREATIVE ━━━━━━━━━━━━ 🦕' },
+];
+
+const DIVIDER_MARKER = '━━━';
+
+function isDivider(page) {
+  const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
+  return title.includes(DIVIDER_MARKER);
+}
 
 function calcPriorityScore(page) {
   const props = page.properties;
@@ -51,8 +69,19 @@ function calcPriorityScore(page) {
     + taskPriorityRank * 1000;
 }
 
-async function getAllOpenTasks() {
-  const tasks = [];
+function getPrimaryRole(page) {
+  const roles = page.properties['Role']?.multi_select ?? [];
+  return roles[0]?.name ?? null;
+}
+
+function getCurrentFocusSlot(page) {
+  const prop = page.properties['Focus Slot'];
+  if (!prop || prop.type !== 'number') return null;
+  return prop.number;
+}
+
+async function getAllOpenPages() {
+  const pages = [];
   let cursor;
 
   do {
@@ -66,37 +95,77 @@ async function getAllOpenTasks() {
       page_size: 100,
     });
 
-    tasks.push(...response.results);
+    pages.push(...response.results);
     cursor = response.has_more ? response.next_cursor : undefined;
   } while (cursor);
 
-  tasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
-
-  return tasks;
+  return pages;
 }
 
-function getCurrentFocusSlot(page) {
-  const prop = page.properties['Focus Slot'];
-  if (!prop || prop.type !== 'number') return null;
-  return prop.number;
+async function ensureDividers(existingDividers) {
+  for (const div of DIVIDERS) {
+    const exists = existingDividers.some(
+      p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
+    );
+
+    if (!exists) {
+      await notion.pages.create({
+        parent: { database_id: DATABASE_ID },
+        properties: {
+          'Name': { title: [{ text: { content: div.name } }] },
+          'Focus Slot': { number: div.slot },
+          'Status': { select: { name: 'To do' } },
+        },
+      });
+      console.log(`[sync] Created divider: "${div.name}"`);
+    }
+  }
 }
 
 async function syncFocusSlots() {
   console.log('[sync] Starting Focus Slot sync...');
 
-  const tasks = await getAllOpenTasks();
-  console.log(`[sync] Found ${tasks.length} open task(s)`);
+  const allPages = await getAllOpenPages();
+  console.log(`[sync] Found ${allPages.length} open page(s)`);
+
+  const dividerPages = allPages.filter(isDivider);
+  const tasks = allPages.filter(p => !isDivider(p));
+
+  await ensureDividers(dividerPages);
+
+  tasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
 
   const updates = [];
+  const assignedIds = new Set();
 
-  for (let i = 0; i < tasks.length; i++) {
-    const page = tasks[i];
-    const desiredSlot = i < FOCUS_SLOTS ? i + 1 : null;
-    const currentSlot = getCurrentFocusSlot(page);
+  for (const section of ROLE_SECTIONS) {
+    const sectionTasks = tasks.filter(t => getPrimaryRole(t) === section.role);
 
-    if (currentSlot === desiredSlot) continue;
+    sectionTasks.forEach((task, i) => {
+      const desired = i < 7 ? section.start + i : null;
+      const current = getCurrentFocusSlot(task);
+      if (current !== desired) {
+        updates.push({ id: task.id, slot: desired });
+      }
+      assignedIds.add(task.id);
+    });
+  }
 
-    updates.push({ id: page.id, slot: desiredSlot });
+  // Clear slots for tasks with no matching role section
+  for (const task of tasks) {
+    if (!assignedIds.has(task.id) && getCurrentFocusSlot(task) !== null) {
+      updates.push({ id: task.id, slot: null });
+    }
+  }
+
+  // Ensure divider slots are correct
+  for (const div of DIVIDERS) {
+    const page = dividerPages.find(
+      p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
+    );
+    if (page && getCurrentFocusSlot(page) !== div.slot) {
+      updates.push({ id: page.id, slot: div.slot });
+    }
   }
 
   console.log(`[sync] ${updates.length} page(s) need updating`);
@@ -104,9 +173,7 @@ async function syncFocusSlots() {
   for (const { id, slot } of updates) {
     await notion.pages.update({
       page_id: id,
-      properties: {
-        'Focus Slot': { number: slot },
-      },
+      properties: { 'Focus Slot': { number: slot } },
     });
     console.log(`[sync] Updated page ${id} → Focus Slot ${slot}`);
   }
