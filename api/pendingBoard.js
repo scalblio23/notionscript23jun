@@ -305,6 +305,7 @@ async function updatePendingBoard() {
 
     const score = calcEfficiencyScore(eligibleTasks, startDate, today);
     const comms = deriveCommsRequired(eligibleTasks);
+    console.log(`[pendingBoard] ${name} startDate=${startDate} score=${score} tasks=${eligibleTasks.length} stages=${[...new Set(eligibleTasks.map(t => getOnboardingStage(t)))].join(',')}`);
 
     return { name, daysOld, comms, overdue, dueToday, upcoming, score };
   });
