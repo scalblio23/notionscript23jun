@@ -266,6 +266,7 @@ async function updatePendingBoard() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  today.setDate(today.getDate() + 1); // offset for UTC vs local timezone
 
   const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
@@ -305,7 +306,6 @@ async function updatePendingBoard() {
 
     const score = calcEfficiencyScore(eligibleTasks, startDate, today);
     const comms = deriveCommsRequired(eligibleTasks);
-    console.log(`[pendingBoard] ${name} startDate=${startDate} score=${score} tasks=${eligibleTasks.length} stages=${[...new Set(eligibleTasks.map(t => getOnboardingStage(t)))].join(',')}`);
 
     return { name, daysOld, comms, overdue, dueToday, upcoming, score };
   });
