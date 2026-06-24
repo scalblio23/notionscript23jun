@@ -80,29 +80,39 @@ async function updateProgressTracker() {
 
   const [tasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
-  // Build pending task numbers per client (tasks that exist and are NOT Done).
+  // Build pending tasks per client (tasks that exist and are NOT Done).
   // Done+archived tasks are absent from the DB entirely — their absence signals completion.
-  const pendingMap = new Map(); // Map<clientId, Set<taskNumber>>
+  const pendingMap = new Map(); // Map<clientId, Map<taskNumber, taskName>>
   for (const task of tasks) {
     const status = task.properties['Status']?.select?.name ?? '';
     if (status === 'Done') continue;
     const clientId = task.properties['Client']?.relation?.[0]?.id;
     if (!clientId) continue;
     const titleText = task.properties['Name']?.title?.[0]?.plain_text ?? '';
-    const match = titleText.match(/^(\d+)\s*-/);
+    const match = titleText.match(/^(\d+)\s*-\s*(.+)$/);
     if (!match) continue;
     const num = parseInt(match[1]);
-    if (!pendingMap.has(clientId)) pendingMap.set(clientId, new Set());
-    pendingMap.get(clientId).add(num);
+    const taskName = match[2].trim();
+    if (!pendingMap.has(clientId)) pendingMap.set(clientId, new Map());
+    pendingMap.get(clientId).set(num, taskName);
   }
 
   const rows = clients.map(client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const ccfRun = client.properties['CCF Trigger']?.select?.name === CCF_DONE_VALUE;
-    const pending = pendingMap.get(clientId) ?? new Set();
-    const stageIndex = deriveStage(pending, ccfRun);
-    return { name, stageIndex };
+    const pendingTaskMap = pendingMap.get(clientId) ?? new Map();
+    const pendingNumbers = new Set(pendingTaskMap.keys());
+    const stageIndex = deriveStage(pendingNumbers, ccfRun);
+
+    // Next urgent task = lowest-numbered pending task (workflow order)
+    let nextTask = null;
+    if (pendingTaskMap.size > 0) {
+      const lowestNum = Math.min(...pendingTaskMap.keys());
+      nextTask = `${lowestNum} - ${pendingTaskMap.get(lowestNum)}`;
+    }
+
+    return { name, stageIndex, nextTask };
   });
 
   rows.sort((a, b) => b.stageIndex - a.stageIndex);
@@ -123,10 +133,11 @@ async function updateProgressTracker() {
     return { clientsTracked: 0 };
   }
 
-  const children = rows.map(({ name, stageIndex }) => {
+  const children = rows.map(({ name, stageIndex, nextTask }) => {
     const bar = progressBar(stageIndex);
     const stageName = STAGES[stageIndex];
-    const line = `${name.padEnd(22)}${bar}  ${stageName}`;
+    const next = nextTask ? `  →  ${nextTask}` : '';
+    const line = `${name.padEnd(22)}${bar}  ${stageName}${next}`;
     return {
       paragraph: { rich_text: [{ text: { content: line } }] },
     };
