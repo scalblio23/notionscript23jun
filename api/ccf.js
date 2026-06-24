@@ -37,7 +37,6 @@ async function getCCFTemplatePages() {
   do {
     const response = await notion.databases.query({
       database_id: CCF_TEMPLATE_DB_ID,
-      sorts: [{ property: '#', direction: 'ascending' }],
       start_cursor: cursor,
       page_size: 100,
     });
