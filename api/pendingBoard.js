@@ -5,14 +5,6 @@ const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const BOARD_BLOCK_ID = '38924f67814f805aa2fed5efafe2d562';
 
-const STAGE_MESSAGES = [
-  { stage: 'Onboarding',    message: 'Send Onboarding Message' },
-  { stage: 'Day 1',         message: 'Send Day 1 Message' },
-  { stage: 'Day 2',         message: 'Send Day 2 Message' },
-  { stage: 'Day 3',         message: 'Send Day 3 Message' },
-  { stage: 'Client Assets', message: 'Request Client Assets' },
-];
-
 const STAGE_DUE_OFFSET = {
   'Onboarding':    1,
   'Day 1':         2,
@@ -128,91 +120,10 @@ function isEligible(page, doneMap) {
   return deps.every(d => doneTasks.has(d));
 }
 
-function calcPriorityScore(page) {
-  const props = page.properties;
-  const taskPriority = props['Task Priority']?.select?.name ?? '';
-  const clientPriority = props['Client Priority']?.select?.name ?? '';
-  const onboardingStage = props['Onboarding Stage']?.select?.name ?? '';
-  const taskName = (props['Name']?.title?.[0]?.plain_text ?? '').toLowerCase();
-
-  if (taskPriority === '💀 Do this before anything else') return -1;
-
-  const clientPriorityRank =
-    clientPriority === 'High' ? 0 :
-    clientPriority === 'Med' ? 1 :
-    clientPriority === 'Low' ? 2 : 3;
-
-  const onboardingStages = new Set(['Onboarding', 'Day 1', 'Day 2', 'Day 3', 'Client Assets']);
-  const taskTypeRank = onboardingStages.has(onboardingStage) ? 0 : 1;
-  const messageRank = taskName.includes('message') ? 0 : 1;
-
-  const stageRank =
-    onboardingStage === 'Onboarding' ? 0 :
-    onboardingStage === 'Day 1' ? 1 :
-    onboardingStage === 'Day 2' ? 2 :
-    onboardingStage === 'Day 3' ? 3 :
-    onboardingStage === 'Client Assets' ? 4 : 5;
-
-  const taskPriorityRank =
-    taskPriority === '🚨 Urgent' ? 1 :
-    taskPriority === '⏰ Important' ? 2 :
-    taskPriority === '🟠 Pending' ? 3 :
-    taskPriority === '😌 Get to it when you can' ? 4 : 5;
-
-  return clientPriorityRank * 10000000
-    + taskTypeRank * 1000000
-    + messageRank * 100000
-    + stageRank * 10000
-    + taskPriorityRank * 1000;
-}
-
-function deriveCommsRequired(eligibleTasks) {
-  const pendingStages = new Set(eligibleTasks.map(t => getOnboardingStage(t)).filter(Boolean));
-  for (const { stage, message } of STAGE_MESSAGES) {
-    if (pendingStages.has(stage)) return message;
-  }
-  return null;
-}
-
 function getScoreColor(score) {
   if (score <= 33) return 'red';
   if (score <= 66) return 'yellow';
   return 'green';
-}
-
-function buildCard({ name, daysOld, comms, overdue, dueToday, upcoming, score }) {
-  const bodyLines = [];
-  if (comms) bodyLines.push(`💬 ${comms}`);
-  bodyLines.push('');
-  if (overdue.length > 0) {
-    bodyLines.push(`⚠️ Overdue (${overdue.length}): ${overdue.map(getTaskShortName).join(', ')}`);
-  }
-  if (dueToday.length > 0) {
-    bodyLines.push(`✅ Due Today (${dueToday.length}): ${dueToday.map(getTaskShortName).join(', ')}`);
-  }
-  if (upcoming.length > 0) {
-    bodyLines.push(`📌 Upcoming: ${getTaskShortName(upcoming[0])}`);
-  }
-  if (overdue.length === 0 && dueToday.length === 0 && upcoming.length === 0) {
-    bodyLines.push('✓ Clear');
-  }
-
-  const richText = [
-    { text: { content: name }, annotations: { bold: true } },
-    { text: { content: '\n' } },
-    { text: { content: `📅 Day ${daysOld ?? '?'}   ` } },
-    { text: { content: `📊 Score: ${score}%` }, annotations: { color: getScoreColor(score) } },
-    { text: { content: '\n' + bodyLines.join('\n') } },
-  ];
-
-  return {
-    type: 'callout',
-    callout: {
-      rich_text: richText,
-      icon: { emoji: '⚫' },
-      color: 'default',
-    },
-  };
 }
 
 async function getAllTasks() {
@@ -288,7 +199,7 @@ async function updatePendingBoard() {
 
   console.log(`[pendingBoard] ${pendingClients.length} pending client(s)`);
 
-  const cards = pendingClients.map(client => {
+  const rows = pendingClients.map(client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const daysOld = getDaysOld(client);
@@ -298,30 +209,43 @@ async function updatePendingBoard() {
       .filter(t => getClientId(t) === clientId)
       .filter(t => isEligible(t, doneMap));
 
-    eligibleTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
-
     const overdue = [];
     const dueToday = [];
-    const upcoming = [];
 
     for (const task of eligibleTasks) {
       const due = getTaskDueDate(task, startDate);
-      if (!due) { upcoming.push(task); continue; }
+      if (!due) continue;
       const d = diffDays(today, due);
       if (d > 0) overdue.push(task);
       else if (d === 0) dueToday.push(task);
-      else upcoming.push(task);
     }
 
     const score = calcEfficiencyScore(eligibleTasks, startDate, today);
-    const comms = deriveCommsRequired(eligibleTasks);
+    const scoreColor = getScoreColor(score);
 
-    return { name, daysOld, comms, overdue, dueToday, upcoming, score };
+    // Build rich_text for one line: NAME  Day X  Score%  | overdue | due today
+    const richText = [
+      { text: { content: name.padEnd(20) }, annotations: { bold: true } },
+      { text: { content: `Day ${daysOld ?? '?'}  ` } },
+      { text: { content: `${score}%` }, annotations: { color: scoreColor } },
+    ];
+
+    if (overdue.length > 0) {
+      richText.push({ text: { content: `  ⚠️ ${overdue.map(getTaskShortName).join(', ')}` }, annotations: { color: 'red' } });
+    }
+    if (dueToday.length > 0) {
+      richText.push({ text: { content: `  ✅ ${dueToday.map(getTaskShortName).join(', ')}` } });
+    }
+    if (overdue.length === 0 && dueToday.length === 0) {
+      richText.push({ text: { content: '  ✓ Clear' }, annotations: { color: 'green' } });
+    }
+
+    return { type: 'paragraph', paragraph: { rich_text: richText } };
   });
 
   await deleteAllChildren(BOARD_BLOCK_ID);
 
-  if (cards.length === 0) {
+  if (rows.length === 0) {
     await notion.blocks.children.append({
       block_id: BOARD_BLOCK_ID,
       children: [{ type: 'paragraph', paragraph: { rich_text: [{ text: { content: 'No pending clients.' } }] } }],
@@ -329,24 +253,10 @@ async function updatePendingBoard() {
     return { clientsShown: 0 };
   }
 
-  const rows = [];
-  for (let i = 0; i < cards.length; i += 2) {
-    const pair = cards.slice(i, i + 2);
-    rows.push({
-      type: 'column_list',
-      column_list: {
-        children: pair.map(card => ({
-          type: 'column',
-          column: { children: [buildCard(card)] },
-        })),
-      },
-    });
-  }
-
   await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: rows });
 
-  console.log(`[pendingBoard] Board updated with ${cards.length} client(s)`);
-  return { clientsShown: cards.length };
+  console.log(`[pendingBoard] Board updated with ${rows.length} client(s)`);
+  return { clientsShown: rows.length };
 }
 
 module.exports = { updatePendingBoard };
