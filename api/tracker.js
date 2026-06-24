@@ -5,6 +5,8 @@ const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const TRACKER_BLOCK_ID = '38924f67814f804d8d24df6cb0f3c506';
 
+const CCF_DONE_VALUE = 'Done';
+
 const STAGES = [
   'Onboarding',
   'Build',
@@ -17,13 +19,26 @@ const STAGES = [
 const FILLED = '🟩';
 const EMPTY  = '⬜';
 
-function deriveStage(doneNumbers) {
-  if (doneNumbers.has(23)) return 5; // Live
-  if (doneNumbers.has(26)) return 4; // Ready For Launch
-  if (doneNumbers.has(20)) return 3; // Launch Preparation
-  if (doneNumbers.has(13) || doneNumbers.has(14) || doneNumbers.has(15)) return 2; // Creative Production
-  if (doneNumbers.has(6))  return 1; // Build
-  return 0;                           // Onboarding
+// Derive stage from which tasks are still pending (not Done, not archived).
+// Tasks that are archived (Done + archived in Notion) disappear from the DB,
+// so we infer completion from absence rather than presence of a Done status.
+// ccfRun: whether CCF was triggered for this client (so absence = done, not "never created")
+function deriveStage(pendingNumbers, ccfRun) {
+  if (!ccfRun) return 0; // CCF not triggered yet → Onboarding
+
+  // All tasks archived/done
+  if (pendingNumbers.size === 0) return 5; // Live
+
+  // A task is "complete" if it is NOT pending (either Done in DB or archived)
+  const done = (num) => !pendingNumbers.has(num);
+  const pending = (num) => pendingNumbers.has(num);
+
+  if (done(23)) return 5; // Launch done → Live
+  if (done(26)) return 4; // Confirmation Message done → Ready For Launch
+  if (done(20)) return 3; // Ad Creatives Approved done → Launch Preparation
+  if (done(6) && (pending(13) || pending(14) || pending(15))) return 2; // Creative Production
+  if (done(6)) return 1;  // Strategy done → Build
+  return 0;               // Onboarding
 }
 
 function progressBar(stageIndex) {
@@ -65,27 +80,28 @@ async function updateProgressTracker() {
 
   const [tasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
-  // Build done set per client: Map<clientId, Set<taskNumber>>
-  const doneMap = new Map();
+  // Build pending task numbers per client (tasks that exist and are NOT Done).
+  // Done+archived tasks are absent from the DB entirely — their absence signals completion.
+  const pendingMap = new Map(); // Map<clientId, Set<taskNumber>>
   for (const task of tasks) {
     const status = task.properties['Status']?.select?.name ?? '';
-    if (status !== 'Done') continue;
+    if (status === 'Done') continue;
     const clientId = task.properties['Client']?.relation?.[0]?.id;
     if (!clientId) continue;
     const titleText = task.properties['Name']?.title?.[0]?.plain_text ?? '';
     const match = titleText.match(/^(\d+)\s*-/);
     if (!match) continue;
     const num = parseInt(match[1]);
-    if (!doneMap.has(clientId)) doneMap.set(clientId, new Set());
-    doneMap.get(clientId).add(num);
+    if (!pendingMap.has(clientId)) pendingMap.set(clientId, new Set());
+    pendingMap.get(clientId).add(num);
   }
 
-  // Build lines sorted by stage descending (most advanced first)
   const rows = clients.map(client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
-    const done = doneMap.get(clientId) ?? new Set();
-    const stageIndex = deriveStage(done);
+    const ccfRun = client.properties['CCF Trigger']?.select?.name === CCF_DONE_VALUE;
+    const pending = pendingMap.get(clientId) ?? new Set();
+    const stageIndex = deriveStage(pending, ccfRun);
     return { name, stageIndex };
   });
 
