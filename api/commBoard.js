@@ -8,14 +8,6 @@ const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const COMM_BOARD_BLOCK_ID = '38924f67814f80f49992d1f780f379ab';
 
-// 10:00 AM ACST = 00:30 UTC
-const SOD_UTC_HOUR = 0;
-const SOD_UTC_MINUTE = 30;
-
-// 5:00 PM ACST = 07:30 UTC
-const EOD_UTC_HOUR = 7;
-const EOD_UTC_MINUTE = 30;
-
 const STAGE_DUE_OFFSET = {
   'Onboarding':    1,
   'Day 1':         2,
@@ -117,19 +109,15 @@ function diffDays(a, b) {
   return Math.floor((a - b) / (1000 * 60 * 60 * 24));
 }
 
-async function generateMessage(clientName, daysOld, tasks, isEOD) {
-  if (tasks.length === 0) return null;
-
+async function generateMessage(clientName, daysOld, tasks) {
   const taskList = tasks.join(', ');
-  const timeOfDay = isEOD ? 'end of day follow-up' : 'morning check-in';
 
-  const prompt = `You are a comms assistant at a digital marketing agency writing a WhatsApp message to a client.
+  const prompt = `You are a comms assistant at a digital marketing agency writing a WhatsApp message to send to a client.
 
 Client: ${clientName} (day ${daysOld ?? '?'} of onboarding)
-Message type: ${timeOfDay}
-Tasks pending for this client today: ${taskList}
+Pending tasks for this client today: ${taskList}
 
-Write a short, warm, slightly witty WhatsApp message (2-3 sentences max) that naturally nudges the client on what's needed or updates them on progress. Sound like a real person. No excessive emojis. Do not start with a greeting like "Hi" or "Hey ${clientName}" — get straight to it. Write only the message, nothing else.`;
+Write a short, warm, slightly witty WhatsApp message (2-3 sentences max) that naturally nudges the client on what's needed. Sound like a real person. One emoji max. Do not open with "Hi" or the client name. Write only the message text.`;
 
   try {
     const msg = await anthropic.messages.create({
@@ -137,7 +125,7 @@ Write a short, warm, slightly witty WhatsApp message (2-3 sentences max) that na
       max_tokens: 150,
       messages: [{ role: 'user', content: prompt }],
     });
-    return msg.content[0]?.text?.trim() ?? null;
+    return msg.content[0]?.text?.trim() ?? taskList;
   } catch (err) {
     console.error(`[commBoard] LLM error for ${clientName}:`, err.message);
     return `Pending: ${taskList}.`;
@@ -158,25 +146,11 @@ function buildTodoBlock(clientName, message) {
   };
 }
 
-function buildHeading(text) {
-  return {
-    type: 'heading_3',
-    heading_3: {
-      rich_text: [{ text: { content: text } }],
-      color: 'default',
-    },
-  };
-}
-
 async function getAllTasks() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({
-      database_id: TASK_DB_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const res = await notion.databases.query({ database_id: TASK_DB_ID, start_cursor: cursor, page_size: 100 });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
@@ -187,11 +161,7 @@ async function getAllClients() {
   const pages = [];
   let cursor;
   do {
-    const res = await notion.databases.query({
-      database_id: CLIENT_DB_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
+    const res = await notion.databases.query({ database_id: CLIENT_DB_ID, start_cursor: cursor, page_size: 100 });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
   } while (cursor);
@@ -224,8 +194,24 @@ async function deleteAllChildren(blockId) {
   console.log(`[commBoard] Cleared ${deleted}/${total} existing block(s)`);
 }
 
-async function buildTodos(clients, openTasks, doneMap, today, isEOD) {
-  const results = await Promise.all(clients.map(async client => {
+async function updateCommBoard() {
+  console.log('[commBoard] Building communication board...');
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  today.setDate(today.getDate() + 1);
+
+  const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
+  const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
+  const doneMap = buildDoneMap(allTasks);
+
+  const activeClients = clients.filter(c => {
+    const status = c.properties['Onboarding Status']?.select?.name;
+    return status === 'Pending' || status === 'Onboarding Complete';
+  });
+
+  // Build todos in parallel
+  const results = await Promise.all(activeClients.map(async client => {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const startDate = getStartDate(client);
@@ -243,70 +229,26 @@ async function buildTodos(clients, openTasks, doneMap, today, isEOD) {
 
     if (tasks.length === 0) return null;
 
-    const message = await generateMessage(name, daysOld, tasks, isEOD);
-    if (!message) return null;
-
+    const message = await generateMessage(name, daysOld, tasks);
     return buildTodoBlock(name, message);
   }));
 
-  return results.filter(Boolean);
-}
+  const todos = results.filter(Boolean);
 
-async function updateCommBoard() {
-  const now = new Date();
-  const utcH = now.getUTCHours();
-  const utcM = now.getUTCMinutes();
+  await deleteAllChildren(COMM_BOARD_BLOCK_ID);
 
-  const isSOD = utcH === SOD_UTC_HOUR && utcM === SOD_UTC_MINUTE;
-  const isEOD = utcH === EOD_UTC_HOUR && utcM === EOD_UTC_MINUTE;
-
-  if (!isSOD && !isEOD) return { skipped: true };
-
-  const label = isSOD ? 'SOD' : 'EOD';
-  console.log(`[commBoard] Running ${label} update...`);
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  today.setDate(today.getDate() + 1); // UTC → ACST offset
-
-  const dateStr = today.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
-
-  const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
-  const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
-  const doneMap = buildDoneMap(allTasks);
-
-  const onboardingClients = clients.filter(
-    c => c.properties['Onboarding Status']?.select?.name === 'Pending'
-  );
-  const activeClients = clients.filter(
-    c => c.properties['Onboarding Status']?.select?.name === 'Onboarding Complete'
-  );
-
-  const [onboardingTodos, activeTodos] = await Promise.all([
-    buildTodos(onboardingClients, openTasks, doneMap, today, isEOD),
-    buildTodos(activeClients, openTasks, doneMap, today, isEOD),
-  ]);
-
-  const allTodos = [...onboardingTodos, ...activeTodos];
-
-  if (allTodos.length === 0) {
-    console.log(`[commBoard] ${label}: no messages needed`);
-    return { label, count: 0 };
+  if (todos.length === 0) {
+    await notion.blocks.children.append({
+      block_id: COMM_BOARD_BLOCK_ID,
+      children: [{ type: 'paragraph', paragraph: { rich_text: [{ text: { content: 'No messages needed today.' } }] } }],
+    });
+    return { count: 0 };
   }
 
-  const heading = isSOD
-    ? `🌅 Morning Messages — ${dateStr}`
-    : `🌆 End of Day Follow-ups — ${dateStr}`;
+  await notion.blocks.children.append({ block_id: COMM_BOARD_BLOCK_ID, children: todos });
 
-  const blocks = [buildHeading(heading), ...allTodos];
-
-  // SOD clears the board; EOD appends below (preserving SOD ticks)
-  if (isSOD) await deleteAllChildren(COMM_BOARD_BLOCK_ID);
-
-  await notion.blocks.children.append({ block_id: COMM_BOARD_BLOCK_ID, children: blocks });
-
-  console.log(`[commBoard] ${label} written — ${allTodos.length} message(s)`);
-  return { label, count: allTodos.length };
+  console.log(`[commBoard] Done — ${todos.length} message(s)`);
+  return { count: todos.length };
 }
 
 module.exports = { updateCommBoard };
