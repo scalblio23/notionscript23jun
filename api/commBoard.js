@@ -144,16 +144,16 @@ Write a short narrative summary of where things stand for this client today.`;
 }
 
 function buildClientBlock(name, narrative) {
+  // All content in rich_text — no children, avoids Notion 2-level nesting limit
   return {
     type: 'callout',
     callout: {
-      rich_text: [{ text: { content: name }, annotations: { bold: true } }],
+      rich_text: [
+        { text: { content: name }, annotations: { bold: true } },
+        { text: { content: '\n' + narrative } },
+      ],
       icon: { emoji: '👤' },
       color: 'default',
-      children: [{
-        type: 'paragraph',
-        paragraph: { rich_text: [{ text: { content: narrative } }] },
-      }],
     },
   };
 }

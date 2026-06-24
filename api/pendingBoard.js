@@ -22,7 +22,6 @@ const STAGE_MESSAGES = [
   { stage: 'Client Assets', message: 'Request Client Assets' },
 ];
 
-// Due date = client start date + offset days
 const STAGE_DUE_OFFSET = {
   'Onboarding':    1,
   'Day 1':         2,
@@ -211,7 +210,10 @@ function buildCard({ name, daysOld, comms, overdue, dueToday, upcoming, score })
     bodyLines.push('✓ Clear');
   }
 
+  // All content in rich_text — no children, avoids Notion nesting limit
   const richText = [
+    { text: { content: name }, annotations: { bold: true } },
+    { text: { content: '\n' } },
     { text: { content: `📅 Day ${daysOld ?? '?'}   ` } },
     { text: { content: `📊 Score: ${score}%` }, annotations: { color: getScoreColor(score) } },
     { text: { content: '\n' + bodyLines.join('\n') } },
@@ -220,13 +222,9 @@ function buildCard({ name, daysOld, comms, overdue, dueToday, upcoming, score })
   return {
     type: 'callout',
     callout: {
-      rich_text: [{ text: { content: name } }],
+      rich_text: richText,
       icon: { emoji: '⚫' },
       color: 'default',
-      children: [{
-        type: 'paragraph',
-        paragraph: { rich_text: richText },
-      }],
     },
   };
 }
@@ -275,7 +273,7 @@ async function updatePendingBoard() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  today.setDate(today.getDate() + 1); // offset for UTC vs local timezone
+  today.setDate(today.getDate() + 1);
 
   const [allTasks, clients] = await Promise.all([getAllTasks(), getAllClients()]);
 
