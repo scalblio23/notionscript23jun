@@ -104,25 +104,30 @@ async function generateMessage(clientName, daysOld, tasks) {
   const taskList = tasks.join(', ');
   const prompt = `You write short WhatsApp messages on behalf of an Australian digital marketing agency, sent TO clients as progress updates.
 
-The agency is telling the client what WE are working on or have done for them today. These are outbound updates — not requests.
+IMPORTANT: The task names below are INTERNAL agency to-do items that are currently in progress — they have NOT been completed yet. Do NOT say we have done them. Instead, write about what we ARE doing or WILL do for the client today.
+
+For example:
+- "Get Terms Signed" → we are sorting out the paperwork / finalising the agreement
+- "Build Ad Creative" → we are working on their ads / putting together their creatives
+- "Strategy Call" → we are preparing their strategy
+- "Send Day 1 Message" → we are checking in on their progress
 
 Style rules:
 - Max 15 words total
 - Casual, direct, friendly — like texting a mate
 - Use "Hey [name]" to open
-- Short punchy sentences
-- Use "will" statements: "Will keep you updated", "Will send through shortly"
+- Use "will" or "working on" statements — never past tense claiming completion
 - No corporate speak, no fluff
 - No more than one emoji, often none
 - Australian informal tone
 
-Examples:
-"Hey Christian thanks for the form! Will start putting the campaign together now"
-"Good morning, continuing to work on your campaign today, hoping to go live tomorrow"
-"Hey mate will post the stats shortly"
+Examples of good messages:
+"Hey Christian, working on your campaign today. Will keep you posted"
+"Good morning, continuing to build out your ads today, hoping to go live soon"
+"Hey mate, sorting out your setup now. Will send through an update shortly"
 
 Client: ${clientName} (day ${daysOld ?? '?'} of onboarding)
-What we are working on for them today: ${taskList}
+Internal tasks in progress for them: ${taskList}
 
 Write the update message. 15 words max. Nothing else.`;
 
