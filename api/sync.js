@@ -19,6 +19,7 @@ const DIVIDERS = [
 
 const DIVIDER_MARKER = '━━━';
 
+// Per-task-number dependencies
 const TASK_DEPENDENCIES = {
   7:  [6],
   10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 27: [6],
@@ -29,7 +30,11 @@ const TASK_DEPENDENCIES = {
   28: [21, 16, 15, 27, 12, 10],
   29: [21, 16, 15, 27, 12, 10],
   23: [26, 15, 16, 13, 14],
-  30: [6, 16], 31: [6, 16], 32: [6, 16], 33: [6, 16], 34: [6, 16],
+};
+
+// Any task in these stages requires all listed task numbers to be Done first
+const STAGE_DEPENDENCIES = {
+  'Client Assets': [6, 16],
 };
 
 function isDivider(page) {
@@ -62,14 +67,22 @@ function buildDoneMap(allTasks) {
 }
 
 function isEligible(page, doneMap) {
-  const num = getTaskNumber(page);
-  if (num === null) return true;
-  const deps = TASK_DEPENDENCIES[num];
-  if (!deps || deps.length === 0) return true;
   const clientId = getClientId(page);
-  if (!clientId) return true;
-  const doneTasks = doneMap.get(clientId) ?? new Set();
-  return deps.every(d => doneTasks.has(d));
+  const doneTasks = clientId ? (doneMap.get(clientId) ?? new Set()) : new Set();
+
+  // Per-task-number dependencies
+  const num = getTaskNumber(page);
+  if (num !== null) {
+    const deps = TASK_DEPENDENCIES[num];
+    if (deps && deps.length > 0 && !deps.every(d => doneTasks.has(d))) return false;
+  }
+
+  // Stage-based dependencies (applies to all tasks in the stage regardless of number)
+  const stage = page.properties['Onboarding Stage']?.select?.name ?? '';
+  const stageDeps = STAGE_DEPENDENCIES[stage];
+  if (stageDeps && stageDeps.length > 0 && !stageDeps.every(d => doneTasks.has(d))) return false;
+
+  return true;
 }
 
 function calcPriorityScore(page) {
