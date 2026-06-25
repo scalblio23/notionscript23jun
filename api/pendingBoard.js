@@ -173,7 +173,7 @@ async function safeDeleteBlock(blockId) {
   try {
     await notion.blocks.delete({ block_id: blockId });
   } catch (err) {
-    if (err.code === 'validation_error') return;
+    if (err.code === 'validation_error' || err.code === 'object_not_found') return;
     throw err;
   }
 }
@@ -229,31 +229,45 @@ async function updatePendingBoard() {
     return buildRichText(name, daysOld, score, todayText, overdueText, upcomingText);
   });
 
-  // Fetch existing blocks once
-  const existing = await getCurrentChildren();
+  // Fetch existing blocks
+  const allExisting = await getCurrentChildren();
 
-  // Update existing paragraph blocks in-place (no delete+append race condition)
-  const updateCount = Math.min(existing.length, desiredRows.length);
-  await Promise.all(
-    Array.from({ length: updateCount }, (_, i) =>
-      notion.blocks.update({ block_id: existing[i].id, paragraph: { rich_text: desiredRows[i] } })
-    )
-  );
+  // Only reuse paragraph blocks — non-paragraph blocks can't be updated in-place
+  const existing = allExisting.filter(b => b.type === 'paragraph');
+  const nonParagraph = allExisting.filter(b => b.type !== 'paragraph');
 
-  // Append any extra rows needed
-  if (desiredRows.length > existing.length) {
-    const extra = desiredRows.slice(existing.length).map(rich_text => ({
-      type: 'paragraph',
-      paragraph: { rich_text },
-    }));
-    await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: extra });
+  // Step 1: Delete non-paragraph blocks and any excess paragraph blocks immediately.
+  // This cleans up duplicates left by any previous concurrent run.
+  const excessParas = existing.slice(desiredRows.length);
+  const toDelete = [...nonParagraph, ...excessParas];
+  if (toDelete.length > 0) {
+    await Promise.all(toDelete.map(b => safeDeleteBlock(b.id)));
+    console.log(`[pendingBoard] Cleaned up ${toDelete.length} excess/invalid block(s)`);
   }
 
-  // Delete any leftover blocks if we have fewer clients than before
-  if (existing.length > desiredRows.length) {
+  // Step 2: Update existing paragraph blocks in-place
+  const reusable = existing.slice(0, desiredRows.length);
+  if (reusable.length > 0) {
     await Promise.all(
-      existing.slice(desiredRows.length).map(b => safeDeleteBlock(b.id))
+      reusable.map((block, i) =>
+        notion.blocks.update({ block_id: block.id, paragraph: { rich_text: desiredRows[i] } })
+      )
     );
+  }
+
+  // Step 3: Append missing rows — re-fetch first to minimise concurrent-append race
+  if (reusable.length < desiredRows.length) {
+    const recheckBlocks = await getCurrentChildren();
+    const recheckParas = recheckBlocks.filter(b => b.type === 'paragraph');
+    const stillNeeded = desiredRows.length - recheckParas.length;
+    if (stillNeeded > 0) {
+      const extra = desiredRows.slice(recheckParas.length).map(rich_text => ({
+        type: 'paragraph',
+        paragraph: { rich_text },
+      }));
+      await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: extra });
+      console.log(`[pendingBoard] Appended ${extra.length} new row(s)`);
+    }
   }
 
   console.log(`[pendingBoard] Board updated with ${desiredRows.length} client(s)`);
