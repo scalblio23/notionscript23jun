@@ -15,6 +15,7 @@ const DIVIDERS = [
   { slot: 9,  name: '🦊 ━━━━━━━━━━━━ OPERATOR ━━━━━━━━━━━━ 🦊' },
   { slot: 17, name: '🦁 ━━━━━━━━━━━━ FOUNDER ━━━━━━━━━━━━ 🦁' },
   { slot: 25, name: '🦕 ━━━━━━━━━━━━ CREATIVE ━━━━━━━━━━━━ 🦕' },
+  { slot: 33, name: '⏳ ━━━━━━━━━━━━ IN PROGRESS ━━━━━━━━━━━━ ⏳' },
 ];
 
 const DIVIDER_MARKER = '━━━';
@@ -72,14 +73,12 @@ function isEligible(page, doneMap) {
   const clientId = getClientId(page);
   const doneTasks = clientId ? (doneMap.get(clientId) ?? new Set()) : new Set();
 
-  // Per-task-number dependencies
   const num = getTaskNumber(page);
   if (num !== null) {
     const deps = TASK_DEPENDENCIES[num];
     if (deps && deps.length > 0 && !deps.every(d => doneTasks.has(d))) return false;
   }
 
-  // Stage-based dependencies (applies to all tasks in the stage regardless of number)
   const stage = page.properties['Onboarding Stage']?.select?.name ?? '';
   const stageDeps = STAGE_DEPENDENCIES[stage];
   if (stageDeps && stageDeps.length > 0 && !stageDeps.every(d => doneTasks.has(d))) return false;
@@ -95,29 +94,23 @@ function calcPriorityScore(page) {
   const taskName = (props['Name']?.title?.[0]?.plain_text ?? '').toLowerCase();
   const efficiency = props['Efficiency']?.select?.name ?? '';
 
-  // Rule 1: absolute override
   if (taskPriority === '💀 Do this before anything else') return -1;
 
-  // Rule 2: Client Priority (High > Med > Low)
   const clientPriorityRank =
     clientPriority === 'High' ? 0 :
     clientPriority === 'Med' ? 1 :
     clientPriority === 'Low' ? 2 : 3;
 
-  // Rule 3: Efficiency (Very Overdue first)
   const efficiencyRank =
     efficiency === 'Very Overdue' ? 0 :
     efficiency === 'Overdue' ? 1 :
     efficiency === 'On Time' ? 2 : 3;
 
-  // Rule 4: Onboarding-related stages rank above plain tasks
   const onboardingStages = new Set(['Onboarding', 'Day 1', 'Day 2', 'Day 3', 'Client Assets']);
   const taskTypeRank = onboardingStages.has(onboardingStage) ? 0 : 1;
 
-  // Rule 5: Message tasks rank higher within their group
   const messageRank = taskName.includes('message') ? 0 : 1;
 
-  // Rule 6: Onboarding Stage sequence
   const stageRank =
     onboardingStage === 'Onboarding' ? 0 :
     onboardingStage === 'Day 1' ? 1 :
@@ -125,7 +118,6 @@ function calcPriorityScore(page) {
     onboardingStage === 'Day 3' ? 3 :
     onboardingStage === 'Client Assets' ? 4 : 5;
 
-  // Rule 7: Task Priority
   const taskPriorityRank =
     taskPriority === '🚨 Urgent' ? 1 :
     taskPriority === '⏰ Important' ? 2 :
@@ -224,25 +216,34 @@ async function syncFocusSlots() {
   console.log(`[sync] Found ${allPages.length} total page(s)`);
 
   const dividerPages = allPages.filter(isDivider);
-  // Exclude both role dividers AND client breakdown dividers from task processing
-  const clientDividerPages = allPages.filter(p => {
-    const title = p.properties['Name']?.title?.[0]?.plain_text ?? '';
-    return title.includes(CLIENT_DIVIDER_EMOJI);
-  });
+  const clientDividerPages = allPages.filter(p =>
+    (p.properties['Name']?.title?.[0]?.plain_text ?? '').includes(CLIENT_DIVIDER_EMOJI)
+  );
   const allTasks = allPages.filter(p => !isDivider(p) && !clientDividerPages.includes(p));
-  const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
+
+  // In Progress tasks go to the bottom section; To Do tasks fill role sections
+  const inProgressTasks = allTasks.filter(
+    t => (t.properties['Status']?.select?.name ?? '') === 'In Progress'
+  );
+  const toDoTasks = allTasks.filter(
+    t => {
+      const s = t.properties['Status']?.select?.name ?? '';
+      return s !== 'Done' && s !== 'In Progress';
+    }
+  );
 
   const doneMap = buildDoneMap(allTasks);
 
   await ensureDividers(dividerPages);
 
-  openTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
+  toDoTasks.sort((a, b) => calcPriorityScore(a) - calcPriorityScore(b));
 
   const updates = [];
   const assignedIds = new Set();
 
+  // Role sections — To Do tasks only
   for (const section of ROLE_SECTIONS) {
-    const sectionTasks = openTasks
+    const sectionTasks = toDoTasks
       .filter(t => getPrimaryRole(t) === section.role)
       .filter(t => isEligible(t, doneMap));
 
@@ -255,7 +256,7 @@ async function syncFocusSlots() {
       assignedIds.add(task.id);
     });
 
-    openTasks
+    toDoTasks
       .filter(t => getPrimaryRole(t) === section.role && !top7.includes(t))
       .forEach(task => {
         if (getCurrentFocusSlot(task) !== null) updates.push({ id: task.id, slot: null });
@@ -263,12 +264,23 @@ async function syncFocusSlots() {
       });
   }
 
-  for (const task of openTasks) {
+  // Clear slots for any To Do task not assigned to a section
+  for (const task of toDoTasks) {
     if (!assignedIds.has(task.id) && getCurrentFocusSlot(task) !== null) {
       updates.push({ id: task.id, slot: null });
     }
   }
 
+  // IN PROGRESS section — always at bottom, no limit, slot 34+
+  let ipSlot = 34;
+  for (const task of inProgressTasks) {
+    assignedIds.add(task.id);
+    const current = getCurrentFocusSlot(task);
+    if (current !== ipSlot) updates.push({ id: task.id, slot: ipSlot });
+    ipSlot++;
+  }
+
+  // Sync role divider slots
   for (const div of DIVIDERS) {
     const page = dividerPages.find(
       p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
@@ -289,7 +301,7 @@ async function syncFocusSlots() {
   }
 
   console.log('[sync] Sync complete.');
-  return { tasksFound: openTasks.length, pagesUpdated: updates.length };
+  return { tasksFound: allTasks.length, pagesUpdated: updates.length };
 }
 
 module.exports = { syncFocusSlots };
