@@ -8,16 +8,21 @@ const DIVIDER_MARKER = '━━━';
 const CLIENT_DIVIDER_EMOJI = '🧑';
 const LEGACY_CLIENT_DIVIDER_MARKER = '───';
 
+// Per-task-number dependencies
 const TASK_DEPENDENCIES = {
   7:  [6],
-  10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 17: [6],
+  10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 27: [6],
   20: [13, 14, 15],
   21: [13, 14, 15],
   25: [1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19,20,21,22,24],
-  28: [21, 16, 15, 17, 12, 10],
-  29: [21, 16, 15, 17, 12, 10],
+  28: [21, 16, 15, 27, 12, 10],
+  29: [21, 16, 15, 27, 12, 10],
   23: [25, 15, 16, 13, 14],
-  30: [6], 31: [6], 32: [6], 33: [6], 34: [6],
+};
+
+// Any task in these stages requires all listed task numbers to be Done first
+const STAGE_DEPENDENCIES = {
+  'Client Assets': [6, 16],
 };
 
 function getTaskNumber(page) {
@@ -54,14 +59,22 @@ function buildDoneMap(allTasks) {
 }
 
 function isEligible(page, doneMap) {
-  const num = getTaskNumber(page);
-  if (num === null) return true;
-  const deps = TASK_DEPENDENCIES[num];
-  if (!deps || deps.length === 0) return true;
   const clientId = getClientId(page);
-  if (!clientId) return true;
-  const doneTasks = doneMap.get(clientId) ?? new Set();
-  return deps.every(d => doneTasks.has(d));
+  const doneTasks = clientId ? (doneMap.get(clientId) ?? new Set()) : new Set();
+
+  // Per-task-number dependencies
+  const num = getTaskNumber(page);
+  if (num !== null) {
+    const deps = TASK_DEPENDENCIES[num];
+    if (deps && deps.length > 0 && !deps.every(d => doneTasks.has(d))) return false;
+  }
+
+  // Stage-based dependencies
+  const stage = page.properties['Onboarding Stage']?.select?.name ?? '';
+  const stageDeps = STAGE_DEPENDENCIES[stage];
+  if (stageDeps && stageDeps.length > 0 && !stageDeps.every(d => doneTasks.has(d))) return false;
+
+  return true;
 }
 
 function calcPriorityScore(page) {
@@ -109,7 +122,7 @@ function deriveStageIndex(pendingNumbers, ccfRun) {
   const done = (num) => !pendingNumbers.has(num);
   const pending = (num) => pendingNumbers.has(num);
   if (done(23)) return 5;
-  if (done(25)) return 4; // Final Details done → Ready For Launch
+  if (done(25)) return 4;
   if (done(20)) return 3;
   if (done(6) && (pending(13) || pending(14) || pending(15))) return 2;
   if (done(6)) return 1;

@@ -18,6 +18,7 @@ const DIVIDERS = [
 ];
 
 const DIVIDER_MARKER = '━━━';
+const CLIENT_DIVIDER_EMOJI = '🧑'; // used by clientBreakdown.js — must NOT be archived here
 
 // Per-task-number dependencies
 const TASK_DEPENDENCIES = {
@@ -37,9 +38,10 @@ const STAGE_DEPENDENCIES = {
   'Client Assets': [6, 16],
 };
 
+// Role dividers only — client breakdown dividers (contain 🧑) are excluded
 function isDivider(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
-  return title.includes(DIVIDER_MARKER);
+  return title.includes(DIVIDER_MARKER) && !title.includes(CLIENT_DIVIDER_EMOJI);
 }
 
 function getTaskNumber(page) {
@@ -222,7 +224,12 @@ async function syncFocusSlots() {
   console.log(`[sync] Found ${allPages.length} total page(s)`);
 
   const dividerPages = allPages.filter(isDivider);
-  const allTasks = allPages.filter(p => !isDivider(p));
+  // Exclude both role dividers AND client breakdown dividers from task processing
+  const clientDividerPages = allPages.filter(p => {
+    const title = p.properties['Name']?.title?.[0]?.plain_text ?? '';
+    return title.includes(CLIENT_DIVIDER_EMOJI);
+  });
+  const allTasks = allPages.filter(p => !isDivider(p) && !clientDividerPages.includes(p));
   const openTasks = allTasks.filter(t => (t.properties['Status']?.select?.name ?? '') !== 'Done');
 
   const doneMap = buildDoneMap(allTasks);
