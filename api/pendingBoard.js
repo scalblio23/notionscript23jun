@@ -13,7 +13,6 @@ const STAGE_DUE_OFFSET = {
   'Client Assets': 3,
 };
 
-// Per-task-number dependencies
 const TASK_DEPENDENCIES = {
   7:  [6],
   10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 27: [6],
@@ -25,7 +24,6 @@ const TASK_DEPENDENCIES = {
   23: [25, 15, 16, 13, 14],
 };
 
-// Any task in these stages requires all listed task numbers to be Done first
 const STAGE_DEPENDENCIES = {
   'Client Assets': [6, 16],
 };
@@ -118,14 +116,12 @@ function isEligible(page, doneMap) {
   const clientId = getClientId(page);
   const doneTasks = clientId ? (doneMap.get(clientId) ?? new Set()) : new Set();
 
-  // Per-task-number dependencies
   const num = getTaskNumber(page);
   if (num !== null) {
     const deps = TASK_DEPENDENCIES[num];
     if (deps && deps.length > 0 && !deps.every(d => doneTasks.has(d))) return false;
   }
 
-  // Stage-based dependencies (applies to all tasks in the stage regardless of number)
   const stage = page.properties['Onboarding Stage']?.select?.name ?? '';
   const stageDeps = STAGE_DEPENDENCIES[stage];
   if (stageDeps && stageDeps.length > 0 && !stageDeps.every(d => doneTasks.has(d))) return false;
@@ -147,6 +143,14 @@ function buildRichText(name, daysOld, score, todayText, overdueText, upcomingTex
     { text: { content: `${score}%` }, annotations: { color: getScoreColor(score) } },
     { text: { content: suffix } },
   ];
+}
+
+// Extract the client name from a board row block (first rich_text segment ends with " - Day N - ")
+function getBlockClientName(block) {
+  if (block.type !== 'paragraph') return null;
+  const firstText = block.paragraph?.rich_text?.[0]?.text?.content ?? '';
+  const match = firstText.match(/^(.+?) - Day /);
+  return match ? match[1] : null;
 }
 
 async function getAllTasks() {
@@ -209,7 +213,9 @@ async function updatePendingBoard() {
 
   console.log(`[pendingBoard] ${pendingClients.length} pending client(s)`);
 
-  const desiredRows = pendingClients.map(client => {
+  // Build desired rows keyed by client name
+  const desiredByName = new Map();
+  for (const client of pendingClients) {
     const clientId = client.id;
     const name = client.properties['Name']?.title?.[0]?.plain_text ?? 'Unknown';
     const daysOld = getDaysOld(client);
@@ -239,52 +245,74 @@ async function updatePendingBoard() {
     const overdueText = overdue.length > 0 ? `${overdue.length} (e.g. ${getTaskShortName(overdue[0])})` : 'None';
     const upcomingText = `${upcoming.length}`;
 
-    return buildRichText(name, daysOld, score, todayText, overdueText, upcomingText);
-  });
+    desiredByName.set(name, buildRichText(name, daysOld, score, todayText, overdueText, upcomingText));
+  }
 
-  // Fetch existing blocks
+  // Read all existing children and index paragraph blocks by client name
   const allExisting = await getCurrentChildren();
+  const existingByName = new Map();
+  const unknownBlocks = []; // paragraph blocks that don't match a client name
+  const nonParagraphBlocks = [];
 
-  // Only reuse paragraph blocks — non-paragraph blocks can't be updated in-place
-  const existing = allExisting.filter(b => b.type === 'paragraph');
-  const nonParagraph = allExisting.filter(b => b.type !== 'paragraph');
-
-  // Step 1: Delete non-paragraph blocks and any excess paragraph blocks immediately.
-  // This cleans up duplicates left by any previous concurrent run.
-  const excessParas = existing.slice(desiredRows.length);
-  const toDelete = [...nonParagraph, ...excessParas];
-  if (toDelete.length > 0) {
-    await Promise.all(toDelete.map(b => safeDeleteBlock(b.id)));
-    console.log(`[pendingBoard] Cleaned up ${toDelete.length} excess/invalid block(s)`);
-  }
-
-  // Step 2: Update existing paragraph blocks in-place
-  const reusable = existing.slice(0, desiredRows.length);
-  if (reusable.length > 0) {
-    await Promise.all(
-      reusable.map((block, i) =>
-        notion.blocks.update({ block_id: block.id, paragraph: { rich_text: desiredRows[i] } })
-      )
-    );
-  }
-
-  // Step 3: Append missing rows — re-fetch first to minimise concurrent-append race
-  if (reusable.length < desiredRows.length) {
-    const recheckBlocks = await getCurrentChildren();
-    const recheckParas = recheckBlocks.filter(b => b.type === 'paragraph');
-    const stillNeeded = desiredRows.length - recheckParas.length;
-    if (stillNeeded > 0) {
-      const extra = desiredRows.slice(recheckParas.length).map(rich_text => ({
-        type: 'paragraph',
-        paragraph: { rich_text },
-      }));
-      await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: extra });
-      console.log(`[pendingBoard] Appended ${extra.length} new row(s)`);
+  for (const block of allExisting) {
+    if (block.type !== 'paragraph') {
+      nonParagraphBlocks.push(block);
+      continue;
+    }
+    const clientName = getBlockClientName(block);
+    if (clientName && desiredByName.has(clientName)) {
+      if (existingByName.has(clientName)) {
+        // Duplicate block for same client — delete the extra
+        unknownBlocks.push(block);
+      } else {
+        existingByName.set(clientName, block);
+      }
+    } else {
+      unknownBlocks.push(block);
     }
   }
 
-  console.log(`[pendingBoard] Board updated with ${desiredRows.length} client(s)`);
-  return { clientsShown: desiredRows.length };
+  // Delete non-paragraph blocks and stale/duplicate paragraph blocks
+  const toDelete = [...nonParagraphBlocks, ...unknownBlocks];
+  if (toDelete.length > 0) {
+    await Promise.all(toDelete.map(b => safeDeleteBlock(b.id)));
+    console.log(`[pendingBoard] Deleted ${toDelete.length} stale/duplicate block(s)`);
+  }
+
+  // Update in-place for clients that already have a block, collect new ones
+  const toAppend = [];
+  for (const [name, richText] of desiredByName) {
+    if (existingByName.has(name)) {
+      await notion.blocks.update({
+        block_id: existingByName.get(name).id,
+        paragraph: { rich_text: richText },
+      });
+    } else {
+      toAppend.push({ type: 'paragraph', paragraph: { rich_text: richText } });
+    }
+  }
+
+  // Append any new clients (re-fetch first to guard against concurrent appends)
+  if (toAppend.length > 0) {
+    const recheck = await getCurrentChildren();
+    const recheckNames = new Set(
+      recheck
+        .filter(b => b.type === 'paragraph')
+        .map(getBlockClientName)
+        .filter(Boolean)
+    );
+    const stillMissing = toAppend.filter(b => {
+      const name = b.paragraph.rich_text[0]?.text?.content?.match(/^(.+?) - Day /)?.[1];
+      return name && !recheckNames.has(name);
+    });
+    if (stillMissing.length > 0) {
+      await notion.blocks.children.append({ block_id: BOARD_BLOCK_ID, children: stillMissing });
+      console.log(`[pendingBoard] Appended ${stillMissing.length} new client row(s)`);
+    }
+  }
+
+  console.log(`[pendingBoard] Board updated with ${desiredByName.size} client(s)`);
+  return { clientsShown: desiredByName.size };
 }
 
 module.exports = { updatePendingBoard };
