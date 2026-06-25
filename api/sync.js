@@ -21,7 +21,6 @@ const DIVIDERS = [
 const DIVIDER_MARKER = '━━━';
 const CLIENT_DIVIDER_EMOJI = '🧑'; // used by clientBreakdown.js — must NOT be archived here
 
-// Per-task-number dependencies
 const TASK_DEPENDENCIES = {
   7:  [6],
   10: [6], 11: [6], 12: [6], 13: [6], 14: [6], 15: [6], 16: [6], 27: [6],
@@ -34,12 +33,14 @@ const TASK_DEPENDENCIES = {
   23: [26, 15, 16, 13, 14],
 };
 
-// Any task in these stages requires all listed task numbers to be Done first
 const STAGE_DEPENDENCIES = {
   'Client Assets': [6, 16],
 };
 
-// Role dividers only — client breakdown dividers (contain 🧑) are excluded
+function getStatus(page) {
+  return (page.properties['Status']?.select?.name ?? '').toLowerCase();
+}
+
 function isDivider(page) {
   const title = page.properties['Name']?.title?.[0]?.plain_text ?? '';
   return title.includes(DIVIDER_MARKER) && !title.includes(CLIENT_DIVIDER_EMOJI);
@@ -58,8 +59,7 @@ function getClientId(page) {
 function buildDoneMap(allTasks) {
   const doneMap = new Map();
   for (const page of allTasks) {
-    const status = page.properties['Status']?.select?.name ?? '';
-    if (status !== 'Done') continue;
+    if (getStatus(page) !== 'done') continue;
     const clientId = getClientId(page);
     const num = getTaskNumber(page);
     if (!clientId || num === null) continue;
@@ -221,16 +221,12 @@ async function syncFocusSlots() {
   );
   const allTasks = allPages.filter(p => !isDivider(p) && !clientDividerPages.includes(p));
 
-  // In Progress tasks go to the bottom section; To Do tasks fill role sections
-  const inProgressTasks = allTasks.filter(
-    t => (t.properties['Status']?.select?.name ?? '') === 'In Progress'
-  );
-  const toDoTasks = allTasks.filter(
-    t => {
-      const s = t.properties['Status']?.select?.name ?? '';
-      return s !== 'Done' && s !== 'In Progress';
-    }
-  );
+  // In Progress tasks (case-insensitive) go to bottom section; everything else fills role sections
+  const inProgressTasks = allTasks.filter(t => getStatus(t) === 'in progress');
+  const toDoTasks = allTasks.filter(t => {
+    const s = getStatus(t);
+    return s !== 'done' && s !== 'in progress';
+  });
 
   const doneMap = buildDoneMap(allTasks);
 
@@ -264,7 +260,7 @@ async function syncFocusSlots() {
       });
   }
 
-  // Clear slots for any To Do task not assigned to a section
+  // Clear slots for unassigned To Do tasks
   for (const task of toDoTasks) {
     if (!assignedIds.has(task.id) && getCurrentFocusSlot(task) !== null) {
       updates.push({ id: task.id, slot: null });
@@ -280,7 +276,7 @@ async function syncFocusSlots() {
     ipSlot++;
   }
 
-  // Sync role divider slots
+  // Sync divider slots
   for (const div of DIVIDERS) {
     const page = dividerPages.find(
       p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
