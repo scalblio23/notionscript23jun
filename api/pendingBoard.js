@@ -4,6 +4,11 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const TASK_DB_ID = process.env.NOTION_DATABASE_ID;
 const CLIENT_DB_ID = process.env.NOTION_CLIENT_DB_ID;
 const BOARD_BLOCK_ID = '38924f67814f805aa2fed5efafe2d562';
+// Stale block IDs from previous versions — delete them to remove duplicate data from Notion page
+const LEGACY_BOARD_BLOCK_IDS = [
+  '38924f67814f801d920fdcbb47de9399',
+  '38924f67814f80988b67c5b861660521',
+];
 
 const STAGE_DUE_OFFSET = {
   'Onboarding':    1,
@@ -195,8 +200,22 @@ async function safeDeleteBlock(blockId) {
   }
 }
 
+async function purgeLegacyBlocks() {
+  for (const blockId of LEGACY_BOARD_BLOCK_IDS) {
+    try {
+      await notion.blocks.delete({ block_id: blockId });
+      console.log(`[pendingBoard] Deleted legacy block ${blockId}`);
+    } catch (err) {
+      if (err.code !== 'object_not_found' && err.code !== 'validation_error') {
+        console.error(`[pendingBoard] Could not delete legacy block ${blockId}: ${err.message}`);
+      }
+    }
+  }
+}
+
 async function updatePendingBoard() {
   console.log('[pendingBoard] Building pending client board...');
+  await purgeLegacyBlocks();
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -251,7 +270,7 @@ async function updatePendingBoard() {
   // Read all existing children and index paragraph blocks by client name
   const allExisting = await getCurrentChildren();
   const existingByName = new Map();
-  const unknownBlocks = []; // paragraph blocks that don't match a client name
+  const unknownBlocks = [];
   const nonParagraphBlocks = [];
 
   for (const block of allExisting) {
@@ -262,7 +281,6 @@ async function updatePendingBoard() {
     const clientName = getBlockClientName(block);
     if (clientName && desiredByName.has(clientName)) {
       if (existingByName.has(clientName)) {
-        // Duplicate block for same client — delete the extra
         unknownBlocks.push(block);
       } else {
         existingByName.set(clientName, block);
