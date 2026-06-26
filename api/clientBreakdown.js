@@ -54,7 +54,7 @@ function buildDoneMap(allTasks) {
 }
 
 function isEligible(page, doneMap) {
-  const num = getTaskNumber(page);
+  const num = getTaskNumber(page);  
   if (num === null) return true;
   const deps = TASK_DEPENDENCIES[num];
   if (!deps || deps.length === 0) return true;
@@ -109,7 +109,7 @@ function deriveStageIndex(pendingNumbers, ccfRun) {
   const done = (num) => !pendingNumbers.has(num);
   const pending = (num) => pendingNumbers.has(num);
   if (done(23)) return 5;
-  if (done(25)) return 4; // Final Details done → Ready For Launch
+  if (done(25)) return 4;
   if (done(20)) return 3;
   if (done(6) && (pending(13) || pending(14) || pending(15))) return 2;
   if (done(6)) return 1;
@@ -225,7 +225,9 @@ async function syncClientBreakdown() {
   }
 
   const existingDividersByName = new Map(
-    existingDividers.map(d => [d.properties['Name']?.title?.[0]?.plain_text ?? '', d])
+    existingDividers
+      .filter(d => neededDividerNames.has(d.properties['Name']?.title?.[0]?.plain_text ?? ''))
+      .map(d => [d.properties['Name']?.title?.[0]?.plain_text ?? '', d])
   );
 
   const updates = [];
@@ -239,15 +241,19 @@ async function syncClientBreakdown() {
     const divName = clientDividerName(name);
 
     if (!existingDividersByName.has(divName)) {
-      await notion.pages.create({
-        parent: { database_id: DATABASE_ID },
-        properties: {
-          'Name': { title: [{ text: { content: divName } }] },
-          'Client Slot': { number: slotCounter },
-          'Onboarding Stage': { select: { name: 'Client Header' } },
-        },
-      });
-      console.log(`[clientBreakdown] Created divider: "${divName}" -> slot ${slotCounter}`);
+      try {
+        await notion.pages.create({
+          parent: { database_id: DATABASE_ID },
+          properties: {
+            'Name': { title: [{ text: { content: divName } }] },
+            'Client Slot': { number: slotCounter },
+            'Onboarding Stage': { select: { name: 'Client Header' } },
+          },
+        });
+        console.log(`[clientBreakdown] Created divider: "${divName}" -> slot ${slotCounter}`);
+      } catch (err) {
+        console.error(`[clientBreakdown] Failed to create divider "${divName}": ${err.message}`);
+      }
       slotCounter++;
     } else {
       const divPage = existingDividersByName.get(divName);
