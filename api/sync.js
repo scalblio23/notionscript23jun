@@ -189,6 +189,16 @@ async function ensureDividers(existingDividers) {
     if (!validNames.has(title)) {
       await notion.pages.update({ page_id: page.id, archived: true });
       console.log(`[sync] Archived stale divider: "${title}"`);
+    } else {
+      // Clear Onboarding Stage so role dividers don't bleed into client breakdown view
+      const currentStage = page.properties['Onboarding Stage']?.select?.name ?? null;
+      if (currentStage !== null) {
+        await notion.pages.update({
+          page_id: page.id,
+          properties: { 'Onboarding Stage': { select: null } },
+        });
+        console.log(`[sync] Cleared Onboarding Stage on divider: "${title}"`);
+      }
     }
   }
 
@@ -202,6 +212,7 @@ async function ensureDividers(existingDividers) {
         properties: {
           'Name': { title: [{ text: { content: div.name } }] },
           'Focus Slot': { number: div.slot },
+          'Onboarding Stage': { select: null },
         },
       });
       console.log(`[sync] Created divider: "${div.name}"`);
@@ -221,7 +232,6 @@ async function syncFocusSlots() {
   );
   const allTasks = allPages.filter(p => !isDivider(p) && !clientDividerPages.includes(p));
 
-  // In Progress tasks (case-insensitive) go to bottom section; everything else fills role sections
   const inProgressTasks = allTasks.filter(t => getStatus(t) === 'in progress');
   const toDoTasks = allTasks.filter(t => {
     const s = getStatus(t);
@@ -237,7 +247,6 @@ async function syncFocusSlots() {
   const updates = [];
   const assignedIds = new Set();
 
-  // Role sections — To Do tasks only
   for (const section of ROLE_SECTIONS) {
     const sectionTasks = toDoTasks
       .filter(t => getPrimaryRole(t) === section.role)
@@ -260,14 +269,12 @@ async function syncFocusSlots() {
       });
   }
 
-  // Clear slots for unassigned To Do tasks
   for (const task of toDoTasks) {
     if (!assignedIds.has(task.id) && getCurrentFocusSlot(task) !== null) {
       updates.push({ id: task.id, slot: null });
     }
   }
 
-  // IN PROGRESS section — always at bottom, no limit, slot 34+
   let ipSlot = 34;
   for (const task of inProgressTasks) {
     assignedIds.add(task.id);
@@ -276,7 +283,6 @@ async function syncFocusSlots() {
     ipSlot++;
   }
 
-  // Sync divider slots
   for (const div of DIVIDERS) {
     const page = dividerPages.find(
       p => (p.properties['Name']?.title?.[0]?.plain_text ?? '') === div.name
