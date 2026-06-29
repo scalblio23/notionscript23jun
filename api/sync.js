@@ -11,9 +11,9 @@ const ROLE_SECTIONS = [
 ];
 
 const DIVIDERS = [
-  { slot: 1,  name: '🦉 ━━━━━━━━━━━━ CSM ASSISTANT ━━━━━━━━━━━━ 🦉' },
-  { slot: 9,  name: '🦊 ━━━━━━━━━━━━ OPERATOR ━━━━━━━━━━━━ 🦊' },
-  { slot: 17, name: '🦁 ━━━━━━━━━━━━ FOUNDER ━━━━━━━━━━━━ 🦁' },
+  { slot: 1,  name: '🦩 ━━━━━━━━━━━━ CSM ASSISTANT ━━━━━━━━━━━━ 🦩' },
+  { slot: 9,  name: '🦦 ━━━━━━━━━━━━ OPERATOR ━━━━━━━━━━━━ 🦦' },
+  { slot: 17, name: '🦡 ━━━━━━━━━━━━ FOUNDER ━━━━━━━━━━━━ 🦡' },
   { slot: 25, name: '🦕 ━━━━━━━━━━━━ CREATIVE ━━━━━━━━━━━━ 🦕' },
   { slot: 33, name: '⏳ ━━━━━━━━━━━━ IN PROGRESS ━━━━━━━━━━━━ ⏳' },
 ];
@@ -132,9 +132,9 @@ function calcPriorityScore(page) {
     + taskPriorityRank     * 1000;
 }
 
-function getPrimaryRole(page) {
+function hasRole(page, role) {
   const roles = page.properties['Role']?.multi_select ?? [];
-  return roles[0]?.name ?? null;
+  return roles.some(r => r.name === role);
 }
 
 function getCurrentFocusSlot(page) {
@@ -190,7 +190,6 @@ async function ensureDividers(existingDividers) {
       await notion.pages.update({ page_id: page.id, archived: true });
       console.log(`[sync] Archived stale divider: "${title}"`);
     } else {
-      // Clear Onboarding Stage so role dividers don't bleed into client breakdown view
       const currentStage = page.properties['Onboarding Stage']?.select?.name ?? null;
       if (currentStage !== null) {
         await notion.pages.update({
@@ -249,7 +248,7 @@ async function syncFocusSlots() {
 
   for (const section of ROLE_SECTIONS) {
     const sectionTasks = toDoTasks
-      .filter(t => getPrimaryRole(t) === section.role)
+      .filter(t => hasRole(t, section.role))
       .filter(t => isEligible(t, doneMap));
 
     const top7 = selectTop7WithMinTasks(sectionTasks);
@@ -262,7 +261,7 @@ async function syncFocusSlots() {
     });
 
     toDoTasks
-      .filter(t => getPrimaryRole(t) === section.role && !top7.includes(t))
+      .filter(t => hasRole(t, section.role) && !top7.includes(t))
       .forEach(task => {
         if (getCurrentFocusSlot(task) !== null) updates.push({ id: task.id, slot: null });
         assignedIds.add(task.id);
