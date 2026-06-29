@@ -247,9 +247,24 @@ async function syncFocusSlots() {
   const assignedIds = new Set();
 
   for (const section of ROLE_SECTIONS) {
-    const sectionTasks = toDoTasks
-      .filter(t => hasRole(t, section.role))
-      .filter(t => isEligible(t, doneMap));
+    const withRole = toDoTasks.filter(t => hasRole(t, section.role));
+    const sectionTasks = withRole.filter(t => isEligible(t, doneMap));
+
+    if (section.role === 'Operator') {
+      console.log(`[sync] Operator: ${withRole.length} with role, ${sectionTasks.length} eligible`);
+      for (const t of withRole) {
+        const name = t.properties['Name']?.title?.[0]?.plain_text ?? '?';
+        const num = getTaskNumber(t);
+        const stage = t.properties['Onboarding Stage']?.select?.name ?? '';
+        const clientId = getClientId(t);
+        const doneTasks = clientId ? (doneMap.get(clientId) ?? new Set()) : new Set();
+        const taskDeps = num !== null ? TASK_DEPENDENCIES[num] : null;
+        const stageDeps = STAGE_DEPENDENCIES[stage] ?? null;
+        const taskBlocked = taskDeps && !taskDeps.every(d => doneTasks.has(d));
+        const stageBlocked = stageDeps && !stageDeps.every(d => doneTasks.has(d));
+        console.log(`[sync]   "${name}" num=${num} stage="${stage}" taskBlocked=${taskBlocked} stageBlocked=${stageBlocked} doneTasks=[${[...doneTasks].join(',')}]`);
+      }
+    }
 
     const top7 = selectTop7WithMinTasks(sectionTasks);
 
