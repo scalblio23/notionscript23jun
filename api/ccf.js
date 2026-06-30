@@ -9,13 +9,14 @@ const CCF_DONE_VALUE = 'Done';
 
 const CCF_TASKS = [
   { number: 1,  name: 'Ad Account Access',        stage: 'Onboarding',    roles: ['Operator'] },
-  { number: 2,  name: 'Page Access',               stage: 'Onboarding',    roles: ['Operator'] },
-  { number: 3,  name: 'Dashboard',                 stage: 'Onboarding',    roles: ['Operator'] },
-  { number: 4,  name: 'Whatsapp Created',          stage: 'Onboarding',    roles: ['Operator'] },
-  { number: 5,  name: 'Terms of service signed',   stage: 'Onboarding',    roles: ['Operator'] },
-  { number: 6,  name: 'Strategy (Campaign Brief)', stage: 'Day 1',         roles: ['Founder'] },
-  { number: 7,  name: 'Funnel Template',           stage: 'Day 1',         roles: ['Operator'] },
-  { number: 8,  name: 'Message (EOD)',              stage: 'Day 1',         roles: ['CSM Assistant'],
+  { number: 2,  name: 'Claude Chat',              stage: 'Onboarding',    roles: ['Operator'] },
+  { number: 3,  name: 'Page Access',              stage: 'Onboarding',    roles: ['Operator'] },
+  { number: 4,  name: 'Added to client List',     stage: 'Onboarding',    roles: ['Operator'] },
+  { number: 5,  name: 'Whatsapp Created',         stage: 'Onboarding',    roles: ['Operator'] },
+  { number: 6,  name: 'Terms of service signed',  stage: 'Onboarding',    roles: ['Operator'] },
+  { number: 7,  name: 'Strategy (Campaign Brief)',stage: 'Day 1',         roles: ['Founder'] },
+  { number: 8,  name: 'Funnel Template',          stage: 'Day 1',         roles: ['Operator'] },
+  { number: 9,  name: 'Message (EOD)',             stage: 'Day 1',         roles: ['CSM Assistant'],
     comment: `Hey [Client] just to give you an update
 
 We have completed your funnel, server and domain - basically the infrastructure needed for your ads
@@ -28,25 +29,31 @@ We are looking to go live as planned on Wednesday and Thursday - which will comm
 
 Cheers mate,
 Henry` },
-  { number: 10, name: 'Domain',                    stage: 'Day 1',         roles: ['Operator'] },
-  { number: 11, name: 'Github Repo',               stage: 'Day 1',         roles: ['Operator'] },
-  { number: 12, name: 'Server',                    stage: 'Day 1',         roles: ['Operator'] },
-  { number: 13, name: 'Ad Images',                 stage: 'Day 2',         roles: ['Creative', 'Operator'] },
-  { number: 14, name: 'Ad Videos',                 stage: 'Day 2',         roles: ['Creative', 'Operator'] },
-  { number: 15, name: 'Ad Copy',                   stage: 'Day 2',         roles: ['Creative', 'Operator'] },
-  { number: 16, name: 'Ad Targeting / Setup',      stage: 'Day 2',         roles: ['Operator'] },
-  { number: 17, name: 'Booking System',            stage: 'Day 2',         roles: ['Operator'] },
-  { number: 18, name: 'Message (Morning)',          stage: 'Day 2',         roles: ['CSM Assistant'],
+  { number: 10, name: 'Message (Morning)',         stage: 'Day 1',         roles: ['CSM Assistant'],
+    comment: `Hi [Client] good morning!
+
+Today is the day!
+
+We will be going live
+
+We will keep you updated throughout the day and let you know if we have any questions` },
+  { number: 11, name: 'GoDaddy Subdomain',        stage: 'Day 1',         roles: ['Operator'] },
+  { number: 12, name: 'Ad Targeting / Setup',     stage: 'Day 1',         roles: ['Operator'] },
+  { number: 13, name: 'Vercel',                   stage: 'Day 1',         roles: ['Operator'] },
+  { number: 14, name: 'Ad Images',                stage: 'Day 2',         roles: ['Creative', 'Operator'] },
+  { number: 15, name: 'Ad Videos',                stage: 'Day 2',         roles: ['Creative', 'Operator'] },
+  { number: 16, name: 'Ad Copy',                  stage: 'Day 2',         roles: ['Creative', 'Operator'] },
+  { number: 17, name: 'Booking System',           stage: 'Day 2',         roles: ['Operator'] },
+  { number: 18, name: 'Message (Morning)',         stage: 'Day 2',         roles: ['CSM Assistant'],
     comment: `Hey [Client] sounds good, working on creatives today for ads
 
 Ready to go live tomorrow
 
 Ill report back close to EOD on progress` },
-  { number: 19, name: 'Message (EOD)',              stage: 'Day 2',         roles: ['CSM Assistant'],
+  { number: 19, name: 'Message (EOD)',             stage: 'Day 2',         roles: ['CSM Assistant'],
     comment: `Hi [Client], yep will be good to go live tomorrow with the first campaign` },
-  { number: 20, name: 'Ad Creatives Approved',     stage: 'Day 3',         roles: ['Founder'] },
-  { number: 21, name: 'Ad Setup + Structure',      stage: 'Day 3',         roles: ['Operator'] },
-  { number: 22, name: 'Message (EOD)',              stage: 'Day 3',         roles: ['CSM Assistant'],
+  { number: 20, name: 'Ad Setup + Structure',     stage: 'Day 3',         roles: ['Operator'] },
+  { number: 21, name: 'Message (EOD)',             stage: 'Day 3',         roles: ['CSM Assistant'],
     comment: `Hey @[Client] good news we are all live and running!
 
 If you have any questions let me know
@@ -56,8 +63,8 @@ There will be 1-3 days of testing as leads come through and we start getting fee
 This also represents the start of your service time
 
 Thanks!` },
-  { number: 23, name: 'Launch',                    stage: 'Day 3',         roles: ['Operator'] },
-  { number: 24, name: 'Message (Morning)',          stage: 'Day 3',         roles: ['CSM Assistant'],
+  { number: 22, name: 'Launch',                   stage: 'Day 3',         roles: ['Operator'] },
+  { number: 23, name: 'Message (Morning)',         stage: 'Day 3',         roles: ['CSM Assistant'],
     comment: `Hi [Client] good morning!
 
 Today is the day!
@@ -65,8 +72,8 @@ Today is the day!
 We will be going live
 
 We will keep you updated throughout the day and let you know if we have any questions` },
-  { number: 25, name: 'Final Details',             stage: 'Day 3',         roles: ['Founder'] },
-  { number: 26, name: 'Confirmation Message',      stage: 'Day 3',         roles: ['CSM Assistant'],
+  { number: 24, name: 'Funnel Test',              stage: 'Day 3',         roles: ['Operator'] },
+  { number: 25, name: 'Confirmation Message',     stage: 'Day 3',         roles: ['CSM Assistant'],
     comment: `Hey [Client] thanks for the message,
 
 Next steps are we will
@@ -76,23 +83,13 @@ Next steps are we will
 • Get the campaign live by Wed, Thu (which is when your service period begins)
 
 In between now and then we will send you ad examples etc, and work back and forth to get things live!` },
-  { number: 27, name: 'Booking System',            stage: 'Day 3',         roles: ['Operator'] },
-  { number: 28, name: 'Automations',               stage: 'Day 3',         roles: ['Operator'] },
-  { number: 29, name: 'Ad Launch',                 stage: 'Day 3',         roles: ['Operator'] },
-  { number: 30, name: 'Conversion Mechanism',      stage: 'Day 3',         roles: ['Operator'] },
-  { number: 31, name: 'Lead Source',               stage: 'Client Assets', roles: ['Operator'] },
-  { number: 32, name: 'Details',                   stage: 'Client Assets', roles: ['Operator'] },
-  { number: 33, name: 'Lead Sheet',                stage: 'Client Assets', roles: ['Operator'] },
-  { number: 34, name: 'Claude Chat',               stage: 'Client Assets', roles: ['Operator'] },
-  { number: 35, name: 'Claude Code',               stage: 'Client Assets', roles: ['Operator'] },
-  { number: 36, name: 'Automation Notification',   stage: 'Client Assets', roles: ['Operator'] },
-  { number: 37, name: 'Server Link',               stage: 'Client Assets', roles: ['Operator'] },
-  { number: 38, name: 'Host',                      stage: 'Client Assets', roles: ['Operator'] },
-  { number: 39, name: 'Github',                    stage: 'Client Assets', roles: ['Operator'] },
-  { number: 40, name: 'GHL Workflow',              stage: 'Client Assets', roles: ['Operator'] },
-  { number: 41, name: 'GoHighLevel',               stage: 'Client Assets', roles: ['Operator'] },
-  { number: 42, name: 'Ad Account',                stage: 'Client Assets', roles: ['Operator'] },
-  { number: 43, name: 'Funnel Link',               stage: 'Client Assets', roles: ['Operator'] },
+  { number: 26, name: 'Automations',              stage: 'Client Assets', roles: ['Operator'] },
+  { number: 27, name: 'Lead Sheet',               stage: 'Client Assets', roles: ['Operator'] },
+  { number: 28, name: 'Ad Launch',                stage: 'Client Assets', roles: ['Operator'] },
+  { number: 29, name: 'Github',                   stage: 'Client Assets', roles: ['Operator'] },
+  { number: 30, name: 'Ad Account',               stage: 'Client Assets', roles: ['Operator'] },
+  { number: 31, name: 'Funnel Link',              stage: 'Client Assets', roles: ['Operator'] },
+  { number: 32, name: 'Server Link',              stage: 'Client Assets', roles: ['Operator'] },
 ];
 
 async function getTriggeredClients() {
